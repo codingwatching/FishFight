@@ -30,6 +30,7 @@ mod prelude {
     pub use once_cell::sync::Lazy;
     pub use serde::{Deserialize, Serialize};
     pub use std::{sync::Arc, time::Duration};
+    #[allow(unused)]
     pub use tracing::{debug, error, info, trace, warn};
 }
 use crate::prelude::*;
@@ -52,6 +53,36 @@ pub struct GameMeta {
     pub theme: ui::UiTheme,
     pub main_menu: ui::main_menu::MainMenuMeta,
     pub music: GameMusic,
+    pub network: NetworkMeta,
+}
+
+#[derive(HasSchema, Copy, Clone, Debug)]
+#[repr(C)]
+pub struct NetworkMeta {
+    pub max_prediction_window: usize,
+    pub local_input_delay: usize,
+}
+
+// In wasm build get derivable_impls clippy warning which breaks CI
+#[allow(clippy::derivable_impls)]
+impl Default for NetworkMeta {
+    fn default() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self {
+                local_input_delay: 0,
+                max_prediction_window: 0,
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self {
+                local_input_delay: bones_framework::networking::NETWORK_LOCAL_INPUT_DELAY_DEFAULT,
+                max_prediction_window:
+                    bones_framework::networking::NETWORK_MAX_PREDICTION_WINDOW_DEFAULT,
+            }
+        }
+    }
 }
 
 #[derive(HasSchema, Clone, Debug, Default)]
@@ -105,6 +136,9 @@ pub struct GameMusic {
 }
 
 fn main() {
+    // Init logging
+    setup_logs!("org", "fishfolk", "jumpy");
+
     // Initialize the Bevy task pool manually so that we can use it during startup.
     bevy_tasks::IoTaskPool::init(bevy_tasks::TaskPool::new);
 
@@ -128,6 +162,7 @@ fn main() {
         .install_plugin(core::game_plugin)
         .install_plugin(debug::game_plugin)
         .install_plugin(profiler::game_plugin)
+        .install_plugin(ui::scoring::game_plugin)
         // We initialize the asset server and register asset types
         .init_shared_resource::<AssetServer>()
         .register_default_assets();
@@ -141,6 +176,22 @@ fn main() {
     game.sessions
         .create(SessionNames::PAUSE_MENU)
         .install_plugin(ui::pause_menu::session_plugin);
+
+    // Set priority to ensure pause menu comes before scoring menu (drawn on top)
+    game.sessions
+        .get_mut(SessionNames::PAUSE_MENU)
+        .unwrap()
+        .priority = 1;
+
+    // Scoring menu plugin, activated by game between round tarnsitions when appropriate
+    game.sessions
+        .create(SessionNames::SCORING)
+        .install_plugin(ui::scoring::session_plugin);
+
+    // session for pop-ups / nofication UI
+    game.sessions
+        .create(SessionNames::NOTIFICATION)
+        .install_plugin(ui::notification::session_plugin);
 
     // Create a bevy renderer for the bones game and run it.
     BonesBevyRenderer {
@@ -159,6 +210,7 @@ fn main() {
             .unwrap_or_else(|_| "packs".into())
             .into(),
         custom_load_progress: Some(Box::new(load_progress)),
+        preload: true,
     }
     .app()
     .run();

@@ -11,17 +11,20 @@ pub mod item;
 pub mod lifetime;
 pub mod map;
 pub mod map_constructor;
+pub mod map_pool;
 pub mod metadata;
 pub mod physics;
 pub mod player;
 pub mod random;
+pub mod scoring;
 pub mod utils;
+pub mod win_indicator;
 
 /// The target fixed frames-per-second that the game sumulation runs at.
 pub const FPS: f32 = 60.0;
 
 /// The maximum number of players per match.
-pub const MAX_PLAYERS: usize = 4;
+pub const MAX_PLAYERS: u32 = 4;
 
 use std::time::Duration;
 
@@ -29,10 +32,10 @@ use crate::{prelude::*, settings::PlayerControlMapping};
 
 pub mod prelude {
     pub use super::{
-        attachment::*, bullet::*, camera::*, damage::*, debug::*, editor::*, editor::*,
-        elements::prelude::*, flappy_jellyfish::*, globals::*, input::*, item::*, lifetime::*,
-        map::*, map_constructor::*, metadata::*, physics::*, player::*, random::*, utils::*, FPS,
-        MAX_PLAYERS,
+        attachment::*, bullet::*, camera::*, damage::*, debug::*, editor::*, elements::prelude::*,
+        flappy_jellyfish::*, globals::*, input::*, item::*, lifetime::*, map::*,
+        map_constructor::*, map_pool::*, metadata::*, physics::*, player::*, random::*, scoring::*,
+        utils::*, win_indicator::*, FPS, MAX_PLAYERS,
     };
 }
 
@@ -43,14 +46,20 @@ pub fn game_plugin(game: &mut Game) {
     MapMeta::register_schema();
     game.install_plugin(elements::game_plugin)
         .install_plugin(bullet::game_plugin)
+        .install_plugin(win_indicator::game_plugin)
         .init_shared_resource::<AssetServer>();
 }
 
 pub struct MatchPlugin {
-    pub map: MapMeta,
-    pub player_info: [PlayerInput; MAX_PLAYERS],
+    pub maps: MapPool,
+    pub player_info: [PlayerInput; MAX_PLAYERS as usize],
     /// The lua plugins to enable for this match.
     pub plugins: Arc<Vec<Handle<LuaPlugin>>>,
+
+    /// Tracks score for match. Should be default if installing for
+    /// new match, but if restarting MatchPlugin to transition between rounds,
+    /// should be inputted from previous session resourc.
+    pub score: MatchScore,
 
     pub session_runner: Box<dyn SessionRunner>,
 }
@@ -82,11 +91,24 @@ impl SessionPlugin for MatchPlugin {
         attachment::install(session);
         bullet::session_plugin(session);
         editor::install(session);
+        scoring::session_plugin(session);
 
-        session.world.insert_resource(LoadedMap(Arc::new(self.map)));
+        let current_map = self.maps.current_map;
+        session.world.insert_resource(self.maps);
+
+        // Initialize LoadedMap on startup as we cannot access AssetServer during MatchPlugin install
+        // to get map meta.
+        session.add_startup_system(
+            move |mut loaded_map: ResMutInit<LoadedMap>, assets: Res<AssetServer>| {
+                let map_meta = assets.get(current_map).clone();
+                *loaded_map = LoadedMap(Arc::new(map_meta))
+            },
+        );
+
         session.world.insert_resource(MatchInputs {
             players: self.player_info,
         });
+        session.world.insert_resource(self.score);
         session.runner = self.session_runner;
     }
 }
@@ -98,6 +120,8 @@ pub struct JumpyDefaultMatchRunner {
     pub input_collector: PlayerInputCollector,
     pub accumulator: f64,
     pub last_run: Option<Instant>,
+    /// Disables local input for session.
+    disable_local_input: bool,
 }
 
 impl SessionRunner for JumpyDefaultMatchRunner {
@@ -126,12 +150,18 @@ impl SessionRunner for JumpyDefaultMatchRunner {
             let input = self.input_collector.get_current_controls();
             {
                 let mut player_inputs = world.resource_mut::<MatchInputs>();
-                (0..MAX_PLAYERS).for_each(|i| {
+                (0..MAX_PLAYERS as usize).for_each(|i| {
                     let player_input = &mut player_inputs.players[i];
                     let Some(source) = &player_input.control_source else {
                         return;
                     };
-                    player_input.control = *input.get(source).unwrap();
+                    if !self.disable_local_input {
+                        player_input.control = *input.get(source).unwrap();
+                    } else {
+                        // This runner is only used for offline play, use default control for all to
+                        // disable input by using default (no input).
+                        player_input.control = PlayerControl::default();
+                    }
                 });
             }
 
@@ -163,5 +193,13 @@ impl SessionRunner for JumpyDefaultMatchRunner {
         }
 
         self.last_run = Some(frame_start);
+    }
+
+    fn restart_session(&mut self) {
+        *self = JumpyDefaultMatchRunner::default();
+    }
+
+    fn disable_local_input(&mut self, disable_input: bool) {
+        self.disable_local_input = disable_input;
     }
 }

@@ -3,13 +3,20 @@
 use crate::prelude::*;
 
 pub use collisions::{
-    Actor, Collider, ColliderShape, CollisionWorld, RapierContext, RapierUserData, Solid,
-    TileCollisionKind,
+    Actor, Collider, ColliderShape, CollisionWorld, PhysicsParams, RapierContext, RapierUserData,
+    Solid, TileCollisionKind,
 };
 
 use super::utils::Rect;
+pub use rapier2d::prelude as rapier;
 
 pub mod collisions;
+pub mod dynamic_body;
+
+pub use dynamic_body::*;
+
+/// For now kinematic mode is globally position based.
+pub static KINEMATIC_MODE: rapier::RigidBodyType = rapier::RigidBodyType::KinematicPositionBased;
 
 #[derive(Debug, Clone, Copy)]
 enum PhysicsStage {
@@ -145,19 +152,28 @@ fn update_kinematic_bodies(
     meta: Root<GameMeta>,
     entities: Res<Entities>,
     mut bodies: CompMut<KinematicBody>,
+    mut dynamic_bodies: CompMut<DynamicBody>,
     mut collision_world: CollisionWorld,
     mut transforms: CompMut<Transform>,
     time: Res<Time>,
 ) {
     puffin::profile_function!();
 
-    // This value was previously using dt / (1 / crate::FPS), this was changed
-    // to no longer have FPS impact velocity, the dt * 60 is a holdover to avoid having
-    // to update all velocities.
-    let time_factor = time.delta().as_secs_f32() * 60.0;
+    let time_factor = time.delta().as_secs_f32();
 
-    collision_world.update(&transforms);
-    for (entity, body) in entities.iter_with(&mut bodies) {
+    let global_gravity = meta.core.physics.gravity;
+    collision_world.update(
+        time_factor,
+        PhysicsParams {
+            gravity: global_gravity,
+            terminal_velocity: Some(meta.core.physics.terminal_velocity),
+        },
+        &mut transforms,
+        &mut dynamic_bodies,
+    );
+    for (entity, (body, dynamic_body)) in
+        entities.iter_with((&mut bodies, &mut OptionalMut(&mut dynamic_bodies)))
+    {
         if body.is_deactivated {
             collision_world.colliders.get_mut(entity).unwrap().disabled = true;
             continue;
@@ -165,6 +181,11 @@ fn update_kinematic_bodies(
             collision_world.colliders.get_mut(entity).unwrap().disabled = false;
         }
 
+        if let Some(dynamic_body) = dynamic_body {
+            if dynamic_body.is_dynamic {
+                continue;
+            }
+        }
         // has the body moved since last call to update_kinematic_bodies?
         let has_moved = {
             let transform = transforms.get(entity).copied().unwrap();
@@ -327,7 +348,7 @@ fn update_kinematic_bodies(
                 body.velocity.y *= meta.core.physics.friction_lerp;
             }
 
-            if body.velocity.y <= meta.core.physics.gravity {
+            if body.velocity.y <= body.gravity * time_factor {
                 body.velocity.y = 0.0;
             }
         }
@@ -342,6 +363,7 @@ fn update_kinematic_bodies(
 
         if body.can_rotate {
             apply_rotation(
+                time_factor,
                 transforms.get_mut(entity).unwrap(),
                 body.velocity,
                 body.angular_velocity,
@@ -354,6 +376,7 @@ fn update_kinematic_bodies(
 
 /// Helper function to apply rotation to a kinematic body.
 fn apply_rotation(
+    delta_time: f32,
     transform: &mut Transform,
     velocity: Vec2,
     angular_velocity: f32,
@@ -369,7 +392,7 @@ fn apply_rotation(
             angle += velocity.x.abs() * angular_velocity;
         }
     } else {
-        angle += (angular_velocity * FPS).to_radians();
+        angle += (angular_velocity * delta_time).to_radians();
     }
 
     transform.rotation = Quat::from_rotation_z(angle);

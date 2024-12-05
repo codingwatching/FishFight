@@ -39,6 +39,7 @@ pub struct CoreMeta {
     pub players: SVec<Handle<PlayerMeta>>,
     pub player_emotes: SMap<Ustr, Handle<EmoteMeta>>,
     pub player_hats: SVec<Handle<HatMeta>>,
+    pub player_win_indicator: Handle<WinIndicatorMeta>,
     pub stable_maps: SVec<Handle<MapMeta>>,
     pub map_elements: SVec<Handle<ElementMeta>>,
     pub experimental_maps: SVec<Handle<MapMeta>>,
@@ -83,6 +84,18 @@ pub struct PhysicsMeta {
     pub terminal_velocity: f32,
     pub friction_lerp: f32,
     pub stop_threshold: f32,
+    pub player: PhysicsPlayerMeta,
+}
+
+#[derive(HasSchema, Clone, Debug, Default)]
+#[repr(C)]
+pub struct PhysicsPlayerMeta {
+    pub ragdoll_initial_pop: f32,
+    pub ragdoll_initial_ang_vel: f32,
+    pub ragdoll_twitch_vel: f32,
+    pub ragdoll_twitch_delay: f32,
+    // Add additional mass to ragdoll body
+    pub ragdoll_additional_mass: f32,
 }
 
 #[derive(HasSchema, Deserialize, Clone, Debug, Default)]
@@ -91,4 +104,20 @@ pub struct CoreConfigMeta {
     #[serde(default)]
     #[serde(with = "humantime_serde")]
     pub respawn_invincibility_time: Duration,
+
+    /// After one or fewer players left, how long to watch before scoring
+    #[serde(default)]
+    #[serde(with = "humantime_serde")]
+    pub round_end_score_time: Duration,
+
+    /// How long round lingers after displaying round winner
+    #[serde(default)]
+    #[serde(with = "humantime_serde")]
+    pub round_end_post_score_linger_time: Duration,
+
+    /// How many rounds must be won to end match
+    pub winning_score_threshold: u32,
+
+    /// How many rounds between intermissions
+    pub rounds_between_intermission: u32,
 }

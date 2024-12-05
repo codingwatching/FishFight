@@ -31,7 +31,7 @@ pub fn plugin(session: &mut Session) {
 }
 
 /// The player index, for example Player 1, Player 2, and so on.
-#[derive(Clone, HasSchema, Deref, DerefMut, Default)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, HasSchema, Deref, DerefMut, Default)]
 pub struct PlayerIdx(pub u32);
 
 /// Contains the entities of the extra player layers, such as the player face and fin.
@@ -247,6 +247,7 @@ impl PlayerCommand {
         })
         .system()
     }
+
     /// Despawn a player.
     ///
     /// > **Note:** This is different than the [`kill`][Self::kill] event in that it immediately
@@ -288,6 +289,7 @@ impl PlayerCommand {
         })
         .system()
     }
+
     /// Set the player's inventory
     pub fn set_inventory(player: Entity, item: Option<Entity>) -> StaticSystem<(), ()> {
         (move |mut items_grabbed: CompMut<ItemGrabbed>,
@@ -310,6 +312,7 @@ impl PlayerCommand {
         })
         .system()
     }
+
     /// Have the player use the item they are carrying, if any.
     pub fn use_item(player: Entity) -> StaticSystem<(), ()> {
         (move |mut items_used: CompMut<ItemUsed>, inventories: CompMut<Inventory>| {
@@ -317,6 +320,29 @@ impl PlayerCommand {
             if let Some(item) = inventories.get(player).and_then(|x| x.0) {
                 // Use it
                 items_used.insert(item, ItemUsed { owner: player });
+            }
+        })
+        .system()
+    }
+
+    /// Drop the player's hat and reset its state.
+    pub fn drop_hat(player: Entity) -> StaticSystem<(), ()> {
+        (move |player_layers: Comp<PlayerLayers>,
+               mut player_body_attachments: CompMut<PlayerBodyAttachment>,
+               mut bodies: CompMut<KinematicBody>,
+               mut atlas_sprites: CompMut<AtlasSprite>| {
+            let Some(layers) = player_layers.get(player) else {
+                return;
+            };
+            let Some(hat_ent) = layers.hat_ent else {
+                return;
+            };
+            // Drop the hat
+            player_body_attachments.remove(hat_ent);
+            bodies.get_mut(hat_ent).unwrap().is_deactivated = false;
+            // Reset its states
+            if let Some(hat_sprite) = atlas_sprites.get_mut(hat_ent) {
+                hat_sprite.color.set_a(1.0);
             }
         })
         .system()
@@ -543,12 +569,19 @@ fn player_ai_system(
 #[derive(Debug, Clone, HasSchema, Default)]
 struct PlayersHaveSpawned {
     /// For each player, whether they have spawned before.
-    pub players: [bool; MAX_PLAYERS],
+    pub players: [bool; MAX_PLAYERS as usize],
 }
 
 /// Marker component for a player hat.
 #[derive(Debug, Clone, HasSchema, Default)]
 struct Hat(Handle<HatMeta>);
+
+/// Build `ColliderShape` for player from `PlayerMeta`.
+pub fn player_collider_shape(meta: &PlayerMeta) -> ColliderShape {
+    ColliderShape::Rectangle {
+        size: meta.body_size,
+    }
+}
 
 fn hydrate_players(
     mut commands: Commands,
@@ -599,7 +632,7 @@ fn hydrate_players(
         let meta = assets.get(player_handle);
 
         let animation_bank_sprite = AnimationBankSprite {
-            current: "idle".try_into().unwrap(),
+            current: "idle".into(),
             animations: meta.layers.body.animations.frames.clone(),
             last_animation: default(),
         };
@@ -627,9 +660,7 @@ fn hydrate_players(
         kinematic_bodies.insert(
             player_entity,
             KinematicBody {
-                shape: ColliderShape::Rectangle {
-                    size: meta.body_size,
-                },
+                shape: player_collider_shape(&meta),
                 has_mass: true,
                 has_friction: false,
                 gravity: meta.gravity,
@@ -655,7 +686,7 @@ fn hydrate_players(
         animation_bank_sprites.insert(
             fin_entity,
             AnimationBankSprite {
-                current: "idle".try_into().unwrap(),
+                current: "idle".into(),
                 animations: meta.layers.fin.animations.clone(),
                 last_animation: default(),
             },
@@ -683,7 +714,7 @@ fn hydrate_players(
         animation_bank_sprites.insert(
             face_entity,
             AnimationBankSprite {
-                current: "idle".try_into().unwrap(),
+                current: "idle".into(),
                 animations: meta.layers.face.animations.clone(),
                 last_animation: default(),
             },
@@ -741,7 +772,7 @@ fn hydrate_players(
                         sync_animation: false,
                     },
                 );
-                item_throws.insert(hat_ent, ItemThrow::strength(7.0));
+                item_throws.insert(hat_ent, ItemThrow::strength(420.0));
                 Some(hat_ent)
             } else {
                 to_kill.push(hat_ent);

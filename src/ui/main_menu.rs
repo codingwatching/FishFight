@@ -5,7 +5,7 @@ use super::ImageMeta;
 mod credits;
 mod map_select;
 pub mod player_select;
-mod settings;
+pub(super) mod settings;
 use shadow_rs::shadow;
 
 // Generate build info.
@@ -82,6 +82,7 @@ pub enum MenuPage {
     NetworkGame,
 }
 
+#[allow(clippy::const_is_empty)]
 static VERSION_STRING: Lazy<String> = Lazy::new(|| {
     format!(
         "{}{}",
@@ -104,12 +105,38 @@ static VERSION_STRING: Lazy<String> = Lazy::new(|| {
 
 fn main_menu_system(world: &World) {
     let ctx = (*world.resource::<EguiCtx>()).clone();
+    let mut close_settings_menu = false;
+
+    // Go to player select menu if either of the `TEST_PLAYER` or `TEST_MAP`
+    // debug env vars are present.
+    #[cfg(debug_assertions)]
+    {
+        use std::env::var_os;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static DEBUG_DID_CHECK_ENV_VARS: AtomicBool = AtomicBool::new(false);
+        if DEBUG_DID_CHECK_ENV_VARS
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            let test_vars = [
+                var_os("TEST_MAP"),
+                var_os("TEST_PLAYER"),
+                var_os("TEST_HAT"),
+                var_os("TEST_CONTROLLER"),
+            ];
+            if test_vars.iter().any(Option::is_some) {
+                ctx.set_state(MenuPage::PlayerSelect);
+            }
+        }
+    }
 
     egui::CentralPanel::default()
         .frame(egui::Frame::none())
         .show(&ctx, |ui| match ctx.get_state::<MenuPage>() {
             MenuPage::Home => world.run_system(home_menu, ui),
-            MenuPage::Settings => world.run_system(settings::widget, ui),
+            MenuPage::Settings => {
+                world.run_system(settings::widget, (ui, &mut close_settings_menu))
+            }
             MenuPage::PlayerSelect => world.run_system(player_select::widget, ui),
             MenuPage::MapSelect { .. } => world.run_system(map_select::widget, ui),
             MenuPage::Credits => world.run_system(credits::widget, ui),
@@ -120,6 +147,10 @@ fn main_menu_system(world: &World) {
             }
         });
 
+    if close_settings_menu {
+        ctx.set_state(MenuPage::Home);
+    }
+
     egui::CentralPanel::default()
         .frame(egui::Frame::none())
         .show(&ctx, |ui| {
@@ -128,10 +159,8 @@ fn main_menu_system(world: &World) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
                     ui.add_space(5.0);
 
-                    ui.add(
-                        egui::TextEdit::singleline(&mut VERSION_STRING.as_str())
-                            .text_color(egui::Color32::WHITE)
-                            .horizontal_align(egui::Align::Max),
+                    ui.label(
+                        egui::RichText::new(VERSION_STRING.as_str()).color(egui::Color32::WHITE),
                     );
                 })
             });
@@ -143,6 +172,7 @@ fn home_menu(
     mut ui: In<&mut egui::Ui>,
     meta: Root<GameMeta>,
     localization: Localization<GameMeta>,
+    #[cfg(not(target_arch = "wasm32"))] exit_game: Option<ResMut<ExitBones>>,
 ) {
     let ui = &mut *ui;
     ui.vertical_centered(|ui| {
@@ -211,12 +241,32 @@ fn home_menu(
                     .show(ui)
                     .clicked()
                 {
-                    // TODO: Gracefully exit game on quit.
-                    // Right now we don't have a way for bones to trigger a Bevy graceful shutdown.
-                    // We need to have a way for bones games to communicate that they want to exit,
-                    // and then the Bones Bevy Renderer can gracefully shutdown.
-                    std::process::exit(0);
+                    if let Some(mut exit) = exit_game {
+                        **exit = true;
+                    }
                 }
             });
     });
+}
+
+#[cfg(debug_assertions)]
+fn handle_names_to_string<'handles, T, It, F>(it: It, get_name: F) -> String
+where
+    T: 'handles,
+    It: IntoIterator<Item = Handle<T>>,
+    F: Fn(Handle<T>) -> &'static str,
+{
+    let mut names = String::new();
+    let mut is_first = true;
+    for h in it.into_iter() {
+        if is_first {
+            is_first = false;
+        } else {
+            names.push_str(", ");
+        }
+        names.push('"');
+        names.push_str(get_name(h));
+        names.push('"');
+    }
+    names
 }

@@ -1,19 +1,24 @@
 use std::ops::Deref;
 
-#[cfg(not(target_arch = "wasm32"))]
-use bones_framework::networking::NetworkMatchSocket;
-
 use crate::{core::JumpyDefaultMatchRunner, prelude::*};
+
+use super::scoring::ScoringMenuState;
 
 #[derive(Clone, Debug, Copy, Default)]
 enum PauseMenuPage {
     #[default]
     Pause,
     MapSelect,
+    Settings,
 }
 
 pub fn session_plugin(session: &mut Session) {
     session.add_system_to_stage(Update, pause_menu_system);
+}
+
+#[derive(HasSchema, Debug, Clone, Default)]
+struct PauseMenu {
+    menu_open: bool,
 }
 
 fn pause_menu_system(
@@ -23,22 +28,26 @@ fn pause_menu_system(
     controls: Res<GlobalPlayerControls>,
     world: &World,
     assets: Res<AssetServer>,
-
-    #[cfg(not(target_arch = "wasm32"))] socket: Option<Res<NetworkMatchSocket>>,
+    mut pause_menu: ResMutInit<PauseMenu>,
 ) {
-    // TODO allow pause menu in online game
-    #[cfg(not(target_arch = "wasm32"))]
-    if socket.is_some() {
-        return;
-    }
-
     let mut back_to_menu = false;
     let mut restart_game = false;
+    let mut close_pause_menu = false;
+    let mut close_settings_menu = false;
     let mut select_map = None;
     if let Some(session) = sessions.get_mut(SessionNames::GAME) {
         let pause_pressed = controls.values().any(|x| x.pause_just_pressed);
 
-        if !session.active {
+        #[cfg(not(target_arch = "wasm32"))]
+        let is_online = session
+            .world
+            .get_resource::<SyncingInfo>()
+            .map_or(false, |x| x.is_online());
+
+        #[cfg(target_arch = "wasm32")]
+        let is_online = false;
+
+        if pause_menu.menu_open {
             let page = ctx.get_state::<PauseMenuPage>();
 
             match page {
@@ -63,7 +72,14 @@ fn pause_menu_system(
 
                                     world.run_system(
                                         main_pause_menu,
-                                        (ui, session, &mut restart_game, &mut back_to_menu),
+                                        (
+                                            ui,
+                                            session,
+                                            &mut restart_game,
+                                            &mut back_to_menu,
+                                            &mut close_pause_menu,
+                                            is_online,
+                                        ),
                                     );
                                 });
                         });
@@ -82,20 +98,37 @@ fn pause_menu_system(
                         }
                     }
                 }
+                PauseMenuPage::Settings => {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::none())
+                        .show(&ctx, |ui| {
+                            world.run_system(
+                                super::main_menu::settings::widget,
+                                (ui, &mut close_settings_menu),
+                            );
+                        });
+                }
+            }
+
+            // When pause menu is open (and not about to be closed), we -re-pause every frame regardless of if just pressed
+            // because in online, if menu is open during a map transition, we need to make sure new net session
+            // disables input to re-pause itself.
+            if !close_pause_menu {
+                pause_session(true, is_online, session, false);
             }
         } else if pause_pressed {
-            session.active = false;
+            pause_menu.menu_open = true;
         }
     }
 
     if back_to_menu {
         sessions.end_game();
         sessions.start_menu();
+        pause_menu.menu_open = false;
     } else if restart_game {
-        sessions.restart_game();
-    } else if let Some(map_handle) = select_map {
-        let map = assets.get(map_handle).clone();
-
+        sessions.restart_game(None, false);
+        pause_menu.menu_open = false;
+    } else if let Some(maps) = select_map {
         let match_info = sessions
             .get(SessionNames::GAME)
             .unwrap()
@@ -105,7 +138,7 @@ fn pause_menu_system(
             .clone();
         sessions.end_game();
         sessions.start_game(crate::core::MatchPlugin {
-            map,
+            maps,
             player_info: std::array::from_fn(|i| PlayerInput {
                 control: default(),
                 editor_input: default(),
@@ -113,28 +146,43 @@ fn pause_menu_system(
             }),
             plugins: meta.get_plugins(&assets),
             session_runner: Box::<JumpyDefaultMatchRunner>::default(),
-        })
+            score: default(),
+        });
+        pause_menu.menu_open = false;
+    }
+
+    if close_pause_menu {
+        pause_menu.menu_open = false;
+    }
+
+    if close_settings_menu {
+        ctx.set_state(PauseMenuPage::Pause);
     }
 }
 
 fn main_pause_menu(
-    mut param: In<(&mut egui::Ui, &mut Session, &mut bool, &mut bool)>,
+    mut param: In<(
+        &mut egui::Ui,
+        &mut Session,
+        &mut bool,
+        &mut bool,
+        &mut bool,
+        bool,
+    )>,
     meta: Root<GameMeta>,
     localization: Localization<GameMeta>,
     controls: Res<GlobalPlayerControls>,
-
-    #[cfg(not(target_arch = "wasm32"))] socket: Option<Res<NetworkMatchSocket>>,
+    scoring_menu: Res<ScoringMenuState>,
 ) {
-    let (ui, session, restart_game, back_to_menu) = &mut *param;
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let is_online = socket.is_some();
-    #[cfg(target_arch = "wasm32")]
-    let is_online = false;
+    let (ui, session, restart_game, back_to_menu, close_pause_menu, is_online) = &mut *param;
 
     // Unpause the game
     if controls.values().any(|x| x.pause_just_pressed) {
-        session.active = true;
+        // Do not unpause game session if scoring menu open.
+        // TODO: Use some kind of pause stack to track what different systems
+        // might want session to remain inactive.
+        pause_session(false, *is_online, session, scoring_menu.active);
+        **close_pause_menu = true;
     }
 
     ui.vertical_centered(|ui| {
@@ -168,13 +216,12 @@ fn main_pause_menu(
             .focus_by_default(ui)
             .clicked()
         {
-            session.active = true;
+            pause_session(false, *is_online, session, false);
+            **close_pause_menu = true;
         }
 
         // Local game buttons
         ui.scope(|ui| {
-            ui.set_enabled(!is_online);
-
             // Map select button
             if BorderedButton::themed(
                 &meta.theme.buttons.normal,
@@ -187,6 +234,15 @@ fn main_pause_menu(
                 ui.ctx().set_state(PauseMenuPage::MapSelect);
             }
 
+            // Settings button
+            if BorderedButton::themed(&meta.theme.buttons.normal, localization.get("settings"))
+                .min_size(vec2(width, 0.0))
+                .show(ui)
+                .clicked()
+            {
+                ui.ctx().set_state(PauseMenuPage::Settings);
+            }
+
             // Restart button
             if BorderedButton::themed(&meta.theme.buttons.normal, localization.get("restart"))
                 .min_size(vec2(width, 0.0))
@@ -197,17 +253,20 @@ fn main_pause_menu(
             }
         });
 
+        // Re-add edit button once map editor is back in game.
+        //
         // Edit button
-        ui.scope(|ui| {
-            if BorderedButton::themed(&meta.theme.buttons.normal, localization.get("edit"))
-                .min_size(vec2(width, 0.0))
-                .show(ui)
-                .clicked()
-            {
-                // TODO: show editor.
-                session.active = true;
-            }
-        });
+        // ui.scope(|ui| {
+        //     if BorderedButton::themed(&meta.theme.buttons.normal, localization.get("edit"))
+        //         .min_size(vec2(width, 0.0))
+        //         .show(ui)
+        //         .clicked()
+        //     {
+        //         // TODO: show editor.
+        //         pause_session(false, *is_online, session, false);
+        //         **close_pause_menu = true;
+        //     }
+        // });
 
         // Main menu button
         if BorderedButton::themed(&meta.theme.buttons.normal, localization.get("main-menu"))
@@ -218,4 +277,19 @@ fn main_pause_menu(
             **back_to_menu = true;
         }
     });
+}
+
+/// Helper for pausing session depending on if online or offline match.
+/// `remain_inactive` is used if other systems like scoring have set session inactive and wish to
+/// prevent that change.
+fn pause_session(paused: bool, is_online: bool, session: &mut Session, remain_inactive: bool) {
+    if is_online {
+        // Online session remains active so that it will not timeout with other players.
+        // Instead we disable the input so it is not captured by game while paused.
+        session.runner.disable_local_input(paused);
+    } else if !paused && !remain_inactive {
+        session.active = true;
+    } else if paused {
+        session.active = false;
+    }
 }

@@ -72,6 +72,38 @@ pub(super) fn widget(
             ],
         ),
         (
+            localization.get("move-up-alt"),
+            [
+                &mut mapping.keyboard1.movement_alt.up,
+                &mut mapping.keyboard2.movement_alt.up,
+                &mut mapping.gamepad.movement_alt.up,
+            ],
+        ),
+        (
+            localization.get("move-down-alt"),
+            [
+                &mut mapping.keyboard1.movement_alt.down,
+                &mut mapping.keyboard2.movement_alt.down,
+                &mut mapping.gamepad.movement_alt.down,
+            ],
+        ),
+        (
+            localization.get("move-left-alt"),
+            [
+                &mut mapping.keyboard1.movement_alt.left,
+                &mut mapping.keyboard2.movement_alt.left,
+                &mut mapping.gamepad.movement_alt.left,
+            ],
+        ),
+        (
+            localization.get("move-right-alt"),
+            [
+                &mut mapping.keyboard1.movement_alt.right,
+                &mut mapping.keyboard2.movement_alt.right,
+                &mut mapping.gamepad.movement_alt.right,
+            ],
+        ),
+        (
             localization.get("jump"),
             [
                 &mut mapping.keyboard1.jump,
@@ -101,6 +133,14 @@ pub(super) fn widget(
                 &mut mapping.keyboard1.slide,
                 &mut mapping.keyboard2.slide,
                 &mut mapping.gamepad.slide,
+            ],
+        ),
+        (
+            localization.get("ragdoll"),
+            [
+                &mut mapping.keyboard1.ragdoll,
+                &mut mapping.keyboard2.ragdoll,
+                &mut mapping.gamepad.ragdoll,
             ],
         ),
         (
@@ -316,13 +356,13 @@ fn get_input(
                 .next()
                 .and_then(|event| match event {
                     GamepadEvent::Button(e) => {
-                        (e.value.abs() > 0.1).then(|| InputKind::Button(e.button.clone()))
+                        (e.value.abs() > 0.1).then_some(InputKind::Button(e.button))
                     }
                     GamepadEvent::Axis(e) => {
                         if e.value > 0.1 {
-                            Some(InputKind::AxisPositive(e.axis.clone()))
+                            Some(InputKind::AxisPositive(e.axis))
                         } else if e.value < -0.1 {
-                            Some(InputKind::AxisNegative(e.axis.clone()))
+                            Some(InputKind::AxisNegative(e.axis))
                         } else {
                             None
                         }

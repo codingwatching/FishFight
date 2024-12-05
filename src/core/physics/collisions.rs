@@ -4,11 +4,16 @@ use std::hash::BuildHasherDefault;
 
 use indexmap::IndexMap;
 
+use rapier::Vector;
+use rapier2d::geometry::InteractionGroups;
 pub use rapier2d::prelude as rapier;
 pub use shape::*;
 
+pub mod filtering;
 mod shape;
 
+use crate::collisions::filtering::CollisionGroup;
+use crate::collisions::filtering::SolverGroup;
 use crate::impl_system_param;
 use crate::prelude::*;
 
@@ -16,13 +21,20 @@ use crate::prelude::*;
 #[derive(HasSchema, Default)]
 pub struct RapierContext {
     pub collision_pipeline: rapier::CollisionPipeline,
-    pub broad_phase: rapier::BroadPhase,
+    pub broad_phase: rapier::DefaultBroadPhase,
     pub narrow_phase: rapier::NarrowPhase,
     pub query_pipeline: rapier::QueryPipeline,
     pub collider_set: rapier::ColliderSet,
     pub rigid_body_set: rapier::RigidBodySet,
     pub collider_shape_cache: ColliderShapeCache,
     pub collision_cache: CollisionCache,
+    pub physics_hooks: PhysicsHooks,
+    pub physics_pipeline: rapier::PhysicsPipeline,
+    pub islands: rapier::IslandManager,
+    pub impulse_joints: rapier::ImpulseJointSet,
+    pub ccd_solver: rapier::CCDSolver,
+    pub multibody_joints: rapier::MultibodyJointSet,
+    pub integration_params: rapier::IntegrationParameters,
 }
 
 impl Clone for RapierContext {
@@ -38,6 +50,15 @@ impl Clone for RapierContext {
             rigid_body_set: self.rigid_body_set.clone(),
             collider_shape_cache: self.collider_shape_cache.clone(),
             collision_cache: self.collision_cache.clone(),
+            physics_hooks: self.physics_hooks.clone(),
+            // Probably should keep this around, it's safe to drop data as only temp buffers,
+            // but re-creating may hurt performance.
+            physics_pipeline: rapier::PhysicsPipeline::default(),
+            islands: self.islands.clone(),
+            impulse_joints: self.impulse_joints.clone(),
+            ccd_solver: self.ccd_solver.clone(),
+            multibody_joints: self.multibody_joints.clone(),
+            integration_params: self.integration_params,
         }
     }
 }
@@ -47,12 +68,23 @@ impl Clone for RapierContext {
 pub struct CollisionCache {
     /// The collisions in the cache.
     pub collisions: Arc<AtomicCell<IndexMap<Entity, Vec<Entity>, EntityBuildHasher>>>,
+
+    /// Map removed collider handles to entities. When Rapier gives collision event for removal,
+    /// the collider is no longer in [`rapier::ColliderSet`], thus we cannot retrieve our user data
+    /// and determine entity to be removed.
+    ///
+    /// Colliders should be added here on removal for event processing, this is cleared each frame.
+    ///
+    /// TODO: Consider a safer way to handle this that doesn't involve remembering to update this on
+    /// removal.
+    removed_colliders: IndexMap<rapier::ColliderHandle, Entity>,
 }
 
 impl Default for CollisionCache {
     fn default() -> Self {
         Self {
             collisions: Arc::new(AtomicCell::new(IndexMap::default())),
+            removed_colliders: Default::default(),
         }
     }
 }
@@ -86,12 +118,24 @@ impl CollisionCache {
             x.entry(entity).or_default()
         })
     }
+
+    /// Notify cache of removal of collider to correctly handle stop event on removed collider.
+    /// see `Self::removed_colliders_userdata` field comment for details.
+    pub fn collider_removed(&mut self, entity: Entity, collider_handle: rapier::ColliderHandle) {
+        self.removed_colliders.insert(collider_handle, entity);
+    }
+
+    /// Clear tracked data for removed colliders this frame (call after rapier update)
+    pub fn clear_removed_colliders(&mut self) {
+        self.removed_colliders.clear();
+    }
 }
 
 impl Clone for CollisionCache {
     fn clone(&self) -> Self {
         Self {
             collisions: Arc::new(AtomicCell::new((*self.collisions.borrow()).clone())),
+            removed_colliders: self.removed_colliders.clone(),
         }
     }
 }
@@ -122,17 +166,25 @@ impl rapier::EventHandler for &mut CollisionCache {
                     .push(a_ent);
             }
             rapier::CollisionEvent::Stopped(a, b, _) => {
-                let Some(a_ent) = colliders
-                    .get(a)
-                    .map(|x| RapierUserData::entity(x.user_data))
-                else {
-                    return;
+                let a_ent = match colliders.get(a) {
+                    Some(a) => RapierUserData::entity(a.user_data),
+                    None => {
+                        if let Some(a_ent) = self.removed_colliders.get(&a) {
+                            *a_ent
+                        } else {
+                            return;
+                        }
+                    }
                 };
-                let Some(b_ent) = colliders
-                    .get(b)
-                    .map(|x| RapierUserData::entity(x.user_data))
-                else {
-                    return;
+                let b_ent = match colliders.get(b) {
+                    Some(b) => RapierUserData::entity(b.user_data),
+                    None => {
+                        if let Some(b_ent) = self.removed_colliders.get(&b) {
+                            *b_ent
+                        } else {
+                            return;
+                        }
+                    }
                 };
 
                 self.collisions
@@ -160,6 +212,69 @@ impl rapier::EventHandler for &mut CollisionCache {
     }
 }
 
+/// Errors produced from physics system
+#[derive(thiserror::Error, Debug)]
+pub enum PhysicsError {
+    #[error("Physics body not initialized: {0}")]
+    BodyNotInitialized(String),
+}
+
+#[derive(Default, Clone)]
+pub struct PhysicsHooks;
+
+impl rapier::PhysicsHooks for PhysicsHooks {
+    fn filter_contact_pair(
+        &self,
+        _context: &rapier::PairFilterContext,
+    ) -> Option<rapier::SolverFlags> {
+        // No contact pair filtering hook currently implemented
+        Some(rapier::SolverFlags::COMPUTE_IMPULSES)
+    }
+
+    fn filter_intersection_pair(&self, _context: &rapier::PairFilterContext) -> bool {
+        // No intersection pair hook currently implemented
+        true
+    }
+
+    fn modify_solver_contacts(&self, context: &mut rapier::ContactModificationContext) {
+        // Determine if jump through modifiation is needed:
+        // (If one body is a player, and other is jump through tile.)
+
+        let collider1 = context.colliders.get(context.collider1).unwrap();
+        let body1 = context.bodies.get(context.rigid_body1.unwrap()).unwrap();
+        let collider2 = context.colliders.get(context.collider2).unwrap();
+        let body2 = context.bodies.get(context.rigid_body2.unwrap()).unwrap();
+
+        let mut jump_through_body: Option<&rapier::RigidBody> = None;
+        let mut other_body: Option<&rapier::RigidBody> = None;
+
+        // Determine which body is jump through collider, if any.
+        if collider1
+            .solver_groups()
+            .memberships
+            .intersects(SolverGroup::JUMP_THROUGH.bits().into())
+        {
+            jump_through_body = Some(body1);
+            other_body = Some(body2);
+        } else if collider2
+            .solver_groups()
+            .memberships
+            .intersects(SolverGroup::JUMP_THROUGH.bits().into())
+        {
+            jump_through_body = Some(body2);
+            other_body = Some(body1);
+        }
+
+        if jump_through_body.is_some() {
+            let other_body = other_body.unwrap();
+
+            if other_body.linvel().y > 0.0 {
+                context.solver_contacts.clear();
+            }
+        }
+    }
+}
+
 impl_system_param! {
     pub struct CollisionWorld<'a> {
         entities: Res<'a, Entities>,
@@ -181,8 +296,153 @@ impl_system_param! {
 
         tile_layers: Comp<'a, TileLayer>,
         tile_collision_kinds: Comp<'a, TileCollisionKind>,
+        tile_dynamic_colliders: Comp<'a, TileDynamicCollider>,
         spawned_map_layer_metas: Comp<'a, SpawnedMapLayerMeta>,
     }
+}
+
+impl<'a> CollisionWorld<'a> {
+    /// Update shape of actor's [`Collider`]. Warns if entity does not have an [`Actor`] component.
+    ///
+    /// Updates shape on `Collider` and rebuilds rapier's collider on rigidbody.
+    ///
+    /// Use [`Self::set_actor_shape_from_builder`] for more control over new collider's settings.
+    pub fn set_actor_shape(&mut self, entity: Entity, shape: ColliderShape) {
+        let shared_shape = self.ctx.collider_shape_cache.shared_shape(shape);
+        let new_collider = build_actor_rapier_collider(entity, shared_shape.clone());
+        self.set_actor_shape_from_builder(entity, new_collider, shape);
+    }
+
+    /// Update shape of actor's [`Collider`]. Warns if entity does not have an [`Actor`] component.
+    ///
+    /// Updates shape on `Collider` and rebuilds rapier's collider on rigidbody.
+    ///
+    /// Accepts a [`rapier::ColliderBuilder`] (can get one with [`build_actor_rapier_collider`]) so
+    /// other settings may be configured on new collider.
+    pub fn set_actor_shape_from_builder(
+        &mut self,
+        entity: Entity,
+        mut collider_builder: rapier::ColliderBuilder,
+        shape: ColliderShape,
+    ) {
+        if !self.actors.contains(entity) {
+            // This doesn't technically need be restricted, however we use default settings of collider for Actor,
+            // and function would need to be updated to do this correctly for Solids, Tiles, or other classes of body.
+            warn!("CollisionWorld::set_actor_shape called on entity that is not an Actor.");
+            return;
+        }
+
+        if let Some(collider) = self.colliders.get_mut(entity) {
+            collider.shape = shape;
+
+            if let Some(handle) = collider.rapier_handle {
+                let RapierContext {
+                    rigid_body_set,
+                    collision_cache,
+                    collider_set,
+                    islands,
+                    ..
+                } = &mut *self.ctx;
+
+                let rapier_body = rigid_body_set.get_mut(handle).unwrap();
+
+                {
+                    let collider_handle = rapier_body.colliders()[0];
+                    let current_rapier_collider = collider_set.get(collider_handle).unwrap();
+
+                    // Update new collider with any settings that need to be synchronized
+                    collider_builder = collider_builder.sensor(current_rapier_collider.is_sensor());
+
+                    // Remove body's current collider
+                    let wake_up = true;
+                    collider_set.remove(collider_handle, islands, rigid_body_set, wake_up);
+
+                    // Notify collision event cache handle was removed
+                    //
+                    // We may get a stop/start even while changing collider. This is required to make sure
+                    // collision event is properly handled by rapier.
+                    collision_cache.collider_removed(entity, collider_handle);
+                }
+
+                // Insert body's new collider
+                collider_set.insert_with_parent(collider_builder, handle, rigid_body_set);
+            } else {
+                // We have an existing Collider but no rapier body yet, shape was updated on Collider
+                // and will be used when body is created.
+            }
+        } else {
+            // No existing collider, insert new one with shape.
+            // Not really expecting this case to be called, but might as well handle it.
+            // rapier body will be created on next call to `sync_colliders`.
+            self.colliders.insert(
+                entity,
+                Collider {
+                    shape,
+                    ..Default::default()
+                },
+            );
+        }
+    }
+
+    /// Call closure with mutable reference to [`rapier::RigidBody`] for entity.
+    ///
+    /// # Errors
+    /// - [`PhysicsError::BodyNotInitialized`] when called before physics is updated to initialize body after
+    ///   a [`Collider`] component is newly added. (If missing collider or rapier handle does not map to body).
+    pub fn mutate_rigidbody(
+        &mut self,
+        entity: Entity,
+        command: impl FnOnce(&mut rapier::RigidBody),
+    ) -> Result<(), PhysicsError> {
+        if let Some(collider) = self.colliders.get(entity) {
+            if let Some(handle) = collider.rapier_handle {
+                if let Some(body) = self.ctx.rigid_body_set.get_mut(handle) {
+                    command(body);
+                    Ok(())
+                } else {
+                    Err(PhysicsError::BodyNotInitialized(
+                        "Rigidbody handle found but not in rigid body set.".to_string(),
+                    ))
+                }
+            } else {
+                Err(PhysicsError::BodyNotInitialized(
+                    "Entity has collider that is missing rapier handle.".to_string(),
+                ))
+            }
+        } else {
+            Err(PhysicsError::BodyNotInitialized(
+                "Entity does not have a Collider component.".to_string(),
+            ))
+        }
+    }
+}
+
+/// Helper function for configuring ColliderBuilder for actors.
+pub fn build_actor_rapier_collider(
+    entity: Entity,
+    shared_shape: rapier::SharedShape,
+) -> rapier::ColliderBuilder {
+    // Do not filter collision pairs, get all collision events
+    let collision_membership = CollisionGroup::DEFAULT;
+    let collision_filter = CollisionGroup::ALL;
+    // Only generate contact forces (when simulating) with solids/tiles, not other dynamics.
+    // This is not relevant if only Kinematic, only relevant if DynamicBody is added and switched to simulating.
+    let simulation_membership = SolverGroup::DYNAMIC;
+    let simulation_filter = SolverGroup::SOLID_WORLD | SolverGroup::JUMP_THROUGH;
+
+    rapier::ColliderBuilder::new(shared_shape)
+        .active_events(rapier::ActiveEvents::COLLISION_EVENTS)
+        .active_collision_types(rapier::ActiveCollisionTypes::all())
+        .collision_groups(rapier::InteractionGroups::new(
+            collision_membership.bits().into(),
+            collision_filter.bits().into(),
+        ))
+        .solver_groups(rapier::InteractionGroups::new(
+            simulation_membership.bits().into(),
+            simulation_filter.bits().into(),
+        ))
+        .sensor(true)
+        .user_data(RapierUserData::from(entity))
 }
 
 /// An actor in the physics simulation.
@@ -232,6 +492,22 @@ pub struct Collider {
 #[derive(Default, Clone, Debug, HasSchema, Deref, DerefMut)]
 pub struct TileRapierHandle(pub rapier::RigidBodyHandle);
 
+/// Component added to tiles that have an additional collider used for interaction with
+/// dynamic bodies that simulate physics.
+///
+/// This collider is added to rapier body stored in [`TileRapierHandle`]. If present,
+/// default collider will not interact with dynamics, and this one will.
+///
+/// This is mostly useful for Jump through tiles.
+#[derive(Default, Clone, HasSchema)]
+pub struct TileDynamicCollider {
+    /// Shape of collider, should be contained within tile.
+    pub shape: ColliderShape,
+
+    /// Offset of collider from center of tile.
+    pub offset: Vec2,
+}
+
 /// Namespace struct for converting rapier collider user data to/from [`Entity`].
 pub struct RapierUserData;
 impl RapierUserData {
@@ -265,22 +541,48 @@ pub enum TileCollisionKind {
     JumpThrough,
 }
 
+impl TileCollisionKind {
+    /// Get the solver group for tile, this is collision filtering group
+    /// used against dynamic bodies that simulate physical collision.
+    /// Does not impact event filtering.
+    pub fn simulation_group_membership(&self) -> SolverGroup {
+        match self {
+            TileCollisionKind::Empty => SolverGroup::NONE,
+            TileCollisionKind::Solid => SolverGroup::SOLID_WORLD,
+            TileCollisionKind::JumpThrough => SolverGroup::JUMP_THROUGH,
+        }
+    }
+}
+
+/// Parameters for physics step
+pub struct PhysicsParams {
+    /// Gravity (positive value is downward force)
+    pub gravity: f32,
+
+    /// Terminal velocity (effectively min velocity on y axis, body will not fall faster than this).
+    pub terminal_velocity: Option<f32>,
+}
+
 impl<'a> CollisionWorld<'a> {
     /// Updates the collision world with the entity's actual transforms.
+    /// Advance physics, synchronize position of dynamic bodies.
     ///
     /// If the transform of an entity is changed without calling `update()`, then collision queries
     /// will be out-of-date with the actual entity positions.
     ///
     /// > **⚠️ Warning:** This does **not** update the map tile collisions. To do that, call
     /// > [`update_tiles()`][Self::update_tiles] instead.
-    pub fn update<'b, Tq>(&mut self, transforms: Tq)
-    where
-        Tq: QueryItem,
-        Tq::Iter: Iterator<Item = &'b Transform>,
-    {
+    pub fn update(
+        &mut self,
+        dt: f32,
+        physics_params: PhysicsParams,
+        transforms: &mut CompMut<Transform>,
+        dynamic_bodies: &mut CompMut<DynamicBody>,
+    ) {
         puffin::profile_function!();
 
-        self.sync_colliders(transforms);
+        self.sync_bodies(&*transforms, dynamic_bodies);
+        self.apply_simulation_commands(&mut *dynamic_bodies);
 
         let RapierContext {
             broad_phase,
@@ -289,7 +591,13 @@ impl<'a> CollisionWorld<'a> {
             collision_cache,
             rigid_body_set,
             narrow_phase,
-            collision_pipeline,
+            physics_hooks,
+            physics_pipeline,
+            islands,
+            impulse_joints,
+            ccd_solver,
+            multibody_joints,
+            integration_params,
             ..
         } = &mut *self.ctx;
 
@@ -301,7 +609,7 @@ impl<'a> CollisionWorld<'a> {
             if !self.entities.is_alive(entity) {
                 // Remove any collisions with the killed entity from the collision cache.
                 let mut collisions = collision_cache.collisions.borrow_mut();
-                let colliding_with = collisions.remove(&entity);
+                let colliding_with = collisions.swap_remove(&entity);
                 if let Some(colliding_with) = colliding_with {
                     for other_entity in colliding_with {
                         if let Some(collisions) = collisions.get_mut(&other_entity) {
@@ -318,39 +626,87 @@ impl<'a> CollisionWorld<'a> {
         for body_handle in to_delete {
             rigid_body_set.remove(
                 body_handle,
-                &mut default(),
+                islands,
                 collider_set,
-                &mut default(),
-                &mut default(),
+                impulse_joints,
+                multibody_joints,
                 true,
             );
         }
 
-        // Update the collision pipeline
-        {
-            puffin::profile_scope!("Collision Pipeline Step");
-            collision_pipeline.step(
-                0.0,
-                broad_phase,
-                narrow_phase,
-                rigid_body_set,
-                collider_set,
-                None,
-                &(),
-                &collision_cache,
-            );
+        // Step physics pipeline, also steps collision pipeline and updates collision cache.
+        integration_params.dt = dt;
+        physics_pipeline.step(
+            &Vector::new(0.0, -physics_params.gravity),
+            integration_params,
+            islands,
+            broad_phase,
+            narrow_phase,
+            rigid_body_set,
+            collider_set,
+            impulse_joints,
+            multibody_joints,
+            ccd_solver,
+            Some(query_pipeline),
+            physics_hooks,
+            &collision_cache,
+        );
+
+        // Force a full rebuild of broadphase
+        // PhysicsPipeline step should incrementally update it, but due to an issue with
+        // incrementally rebalancing BVH in parry2d, the tree becomes unbalanced and query perf tanks.
+        // Rebuilding it every frame is quite fast for our game, and avoids this issue.
+        // https://github.com/fishfolk/jumpy/issues/961
+        query_pipeline.update(rigid_body_set, collider_set);
+
+        // Iter on each dynamic rigid-bodies that moved.
+        for rigid_body_handle in islands.active_dynamic_bodies() {
+            let rigid_body = rigid_body_set.get_mut(*rigid_body_handle).unwrap();
+            let entity = RapierUserData::entity(rigid_body.user_data);
+            if let Some(dynamic_body) = dynamic_bodies.get_mut(entity) {
+                if dynamic_body.is_dynamic {
+                    let transform = transforms.get_mut(entity).unwrap();
+                    let rotation = Quat::from_rotation_z(rigid_body.rotation().angle());
+                    // Get translation from physics and preserve Z offset of transform
+                    let translation: Vec3 = rigid_body
+                        .translation()
+                        .xy()
+                        .push(transform.translation.z)
+                        .into();
+                    transform.translation = translation;
+                    transform.rotation = rotation;
+
+                    // Apply terminal velocity. Without this kinematic and dynamic objects may
+                    // fall at different speeds even if same graviy applied. This is used to mirror
+                    // kinematic motion of gravity + terminal vel limit.
+                    if let Some(terminal_vel) = physics_params.terminal_velocity {
+                        let mut vel = *rigid_body.linvel();
+                        if vel.y < -terminal_vel {
+                            vel.y = -terminal_vel;
+                            rigid_body.set_linvel(vel, true);
+                        }
+                    }
+
+                    // Update simulation output for tracking if transform is modified outside of rapier
+                    // next frame.
+                    dynamic_body.update_last_rapier_synced_transform(translation, rotation)
+                } else {
+                    warn!("Active dynamic bodies contained DynamicBody that is not simulating");
+                }
+            } else {
+                warn!("Active dynamic bodies contained entity that does not have a DynamicBody.");
+            }
         }
 
-        // Update the query pipeline
-        {
-            puffin::profile_scope!("Query Pipeline Update");
-            query_pipeline.update(rigid_body_set, collider_set);
-        }
+        // Reset tracking of removed colliders for this frame
+        collision_cache.clear_removed_colliders();
     }
 
-    /// Sync the transforms and attributes ( like `disabled` ) of the colliders. ( Does not update
-    /// collision pipeline, and is only for use internally. )
-    fn sync_colliders<'b, Tq>(&mut self, transforms: Tq)
+    /// Sync the transforms and attributes ( like `disabled` ) of the colliders.
+    /// Creates rapier bodies for any object with collision.
+    ///
+    /// Handle [`DynamicBody`] toggling between simulation and kinematic mode.
+    pub fn sync_bodies<'b, Tq>(&mut self, transforms: Tq, dynamic_bodies: &mut CompMut<DynamicBody>)
     where
         Tq: QueryItem,
         Tq::Iter: Iterator<Item = &'b Transform>,
@@ -363,43 +719,95 @@ impl<'a> CollisionWorld<'a> {
             collider_shape_cache,
             ..
         } = &mut *self.ctx;
-        for (ent, (transform, collider)) in
-            self.entities.iter_with((transforms, &mut self.colliders))
-        {
+        for (ent, (transform, collider, dynamic_body)) in self.entities.iter_with((
+            transforms,
+            &mut self.colliders,
+            &mut OptionalMut(dynamic_bodies),
+        )) {
             // Get the rapier shape.
             //
             // TODO: Evaluate whether or not caching the colliders like this actually improves
             // performance.
             let shared_shape = collider_shape_cache.shared_shape(collider.shape);
 
+            let is_dynamic = match dynamic_body.as_ref() {
+                Some(dynamic_body) => dynamic_body.is_dynamic,
+                None => false,
+            };
+
             // Get the handle to the rapier collider, creating it if it doesn't exist.
             let rapier_handle = collider.rapier_handle.get_or_insert_with(|| {
-                let body_handle = rigid_body_set.insert(
-                    rapier::RigidBodyBuilder::dynamic().user_data(RapierUserData::from(ent)),
-                );
+                // Initialize body
+                let body_handle = rigid_body_set.insert(if is_dynamic {
+                    rapier::RigidBodyBuilder::dynamic().user_data(RapierUserData::from(ent))
+                } else if KINEMATIC_MODE == rapier::RigidBodyType::KinematicPositionBased {
+                    rapier::RigidBodyBuilder::kinematic_position_based()
+                        .user_data(RapierUserData::from(ent))
+                } else {
+                    rapier::RigidBodyBuilder::kinematic_velocity_based()
+                        .user_data(RapierUserData::from(ent))
+                });
+
                 collider_set.insert_with_parent(
-                    rapier::ColliderBuilder::new(shared_shape.clone())
-                        .active_events(rapier::ActiveEvents::COLLISION_EVENTS)
-                        .active_collision_types(rapier::ActiveCollisionTypes::all())
-                        .user_data(RapierUserData::from(ent)),
+                    build_actor_rapier_collider(ent, shared_shape.clone()),
                     body_handle,
                     rigid_body_set,
                 );
                 body_handle
             });
             let rapier_body = rigid_body_set.get_mut(*rapier_handle).unwrap();
-
-            // Set the transform of the collider.
-            rapier_body.set_position(
-                rapier::Isometry::new(
-                    transform.translation.truncate().to_array().into(),
-                    transform.rotation.to_euler(EulerRot::XYZ).2,
-                ),
-                true,
-            );
             let rapier_collider = collider_set.get_mut(rapier_body.colliders()[0]).unwrap();
+
+            if let Some(dynamic_body) = dynamic_body {
+                // Handle changes in is_dynamic
+                let was_dynamic = matches!(rapier_body.body_type(), rapier::RigidBodyType::Dynamic);
+                if !was_dynamic && is_dynamic {
+                    rapier_body.set_body_type(rapier::RigidBodyType::Dynamic, true);
+
+                    // Clear any velocity that may be left from previously simulating body.
+                    // If Dynamic is newly initialized or user wants to apply velocity changes before next step,
+                    // `DynamicBody::push_simulation_command` may be used which is called after this operation.
+                    rapier_body.set_linvel(Vector::zeros(), true);
+                    rapier_body.set_angvel(0.0, true);
+
+                    // TODO: We may want to synchronize kinematic body's gravity, mass, and other properties.
+
+                    rapier_collider.set_sensor(false);
+
+                    // Enable contact modification for all bodies to handle stuff like jump through.
+                    rapier_collider.set_active_hooks(rapier::ActiveHooks::MODIFY_SOLVER_CONTACTS);
+                } else if was_dynamic && !is_dynamic {
+                    rapier_collider.set_sensor(true);
+                    rapier_collider.set_active_hooks(rapier::ActiveHooks::empty());
+
+                    rapier_body.set_body_type(KINEMATIC_MODE, true);
+                }
+
+                // This function still calls for position update if is_dynamic = false
+                if dynamic_body.simulation_transform_needs_update(transform) {
+                    rapier_body.set_position(
+                        rapier::Isometry::new(
+                            transform.translation.truncate().to_array().into(),
+                            transform.rotation.to_euler(EulerRot::XYZ).2,
+                        ),
+                        true,
+                    )
+                }
+            } else {
+                // update position of kinematics
+                //
+                // TODO: we may want to use rapier::RigidBody::set_next_kinematic_position
+                // so rapier computes velocity of kinematics for better interaction with dynamics,
+                // however we don't currently have any kinematic <-> dynamic interaction.
+                rapier_body.set_position(
+                    rapier::Isometry::new(
+                        transform.translation.truncate().to_array().into(),
+                        transform.rotation.to_euler(EulerRot::XYZ).2,
+                    ),
+                    true,
+                );
+            }
             rapier_collider.set_enabled(!collider.disabled);
-            rapier_collider.set_position_wrt_parent(rapier::Isometry::new(default(), 0.0));
         }
 
         for (solid_ent, solid) in self.entities.iter_with(&mut self.solids) {
@@ -411,10 +819,24 @@ impl<'a> CollisionWorld<'a> {
                 let body_handle = rigid_body_set.insert(
                     rapier::RigidBodyBuilder::fixed().user_data(RapierUserData::from(solid_ent)),
                 );
+                // Membership default, does not filter out collision events.
+                let collision_membership = CollisionGroup::DEFAULT;
+                let collision_filter = CollisionGroup::ALL;
+                // Solids do not filter contact forces with other bodies.
+                let simulation_membership = SolverGroup::SOLID_WORLD;
+                let simulation_filter = SolverGroup::ALL;
                 collider_set.insert_with_parent(
                     rapier::ColliderBuilder::new(shared_shape.clone())
                         .active_events(rapier::ActiveEvents::COLLISION_EVENTS)
                         .active_collision_types(rapier::ActiveCollisionTypes::all())
+                        .collision_groups(InteractionGroups::new(
+                            collision_membership.bits().into(),
+                            collision_filter.bits().into(),
+                        ))
+                        .solver_groups(InteractionGroups::new(
+                            simulation_membership.bits().into(),
+                            simulation_filter.bits().into(),
+                        ))
                         .user_data(RapierUserData::from(solid_ent)),
                     body_handle,
                     rigid_body_set,
@@ -430,6 +852,31 @@ impl<'a> CollisionWorld<'a> {
             rapier_collider.set_enabled(!solid.disabled);
             rapier_collider.set_position_wrt_parent(rapier::Isometry::new(default(), 0.0));
             rapier_collider.set_shape(shared_shape.clone());
+        }
+    }
+
+    /// Apply simulation commands to dynamic bodies.
+    ///
+    /// # Panics
+    ///
+    /// This should be called after bodies are initialized, [`DynamicBody`] must have
+    /// a [`Collider`] with valid `rapier::RigidBodyHandle` otherwise will panic.
+    fn apply_simulation_commands<'b, Dq>(&mut self, dynamic_bodies: Dq)
+    where
+        Dq: QueryItem,
+        Dq::Iter: Iterator<Item = &'b mut DynamicBody>,
+    {
+        for (ent, dynamic_body) in self.entities.iter_with(dynamic_bodies) {
+            // This will consume commands even if body is_dynamic is false.
+            let commands = dynamic_body.simulation_commands();
+            if dynamic_body.is_dynamic {
+                let collider = self.colliders.get(ent).unwrap();
+                let rapier_handle = collider.rapier_handle.unwrap();
+                let rapier_body = self.ctx.rigid_body_set.get_mut(rapier_handle).unwrap();
+                for command in commands {
+                    command(rapier_body);
+                }
+            }
         }
     }
 
@@ -463,9 +910,11 @@ impl<'a> CollisionWorld<'a> {
             .entities
             .iter_with((&self.tile_layers, &self.spawned_map_layer_metas))
         {
-            let tile_shared_shape = collider_shape_cache.shared_shape(ColliderShape::Rectangle {
-                size: layer.tile_size,
-            });
+            let tile_shared_shape = collider_shape_cache
+                .shared_shape(ColliderShape::Rectangle {
+                    size: layer.tile_size,
+                })
+                .clone();
             for x in 0..layer.grid_size.x {
                 for y in 0..layer.grid_size.y {
                     let pos = uvec2(x, y);
@@ -479,6 +928,9 @@ impl<'a> CollisionWorld<'a> {
                     let collider_x = x as f32 * layer.tile_size.x + layer.tile_size.x / 2.0;
                     let collider_y = y as f32 * layer.tile_size.y + layer.tile_size.y / 2.0;
 
+                    // Get dynamic collider if we have one
+                    let dynamic_collider = self.tile_dynamic_colliders.get(tile_ent);
+
                     // Get or create a collider for the tile
                     let handle = self
                         .tile_rapier_handles
@@ -489,14 +941,60 @@ impl<'a> CollisionWorld<'a> {
                                 rapier::RigidBodyBuilder::fixed()
                                     .user_data(RapierUserData::from(tile_ent)),
                             );
+
+                            // Set SolverGroup based on collision kind so dynamic bodies
+                            // know if they should generate contact forces with tile or not.
+                            let mut simulation_membership = SolverGroup::NONE;
+                            if let Some(collision_kind) = self.tile_collision_kinds.get(tile_ent) {
+                                simulation_membership =
+                                    collision_kind.simulation_group_membership();
+                            }
+                            let simulation_filter = SolverGroup::ALL;
+
+                            // Sim group for default tile collider. This is not used for collision
+                            // (only used for events) if an additional "dynamic" collider is present
+                            // to be used for collision response.
+                            let mut default_collider_sim_membership = simulation_membership;
+                            if dynamic_collider.is_some() {
+                                default_collider_sim_membership = SolverGroup::NONE;
+                            }
+
+                            // Insert default collider
                             collider_set.insert_with_parent(
                                 rapier::ColliderBuilder::new(tile_shared_shape.clone())
                                     .active_events(rapier::ActiveEvents::COLLISION_EVENTS)
                                     .active_collision_types(rapier::ActiveCollisionTypes::all())
+                                    .solver_groups(InteractionGroups::new(
+                                        default_collider_sim_membership.bits().into(),
+                                        simulation_filter.bits().into(),
+                                    ))
                                     .user_data(RapierUserData::from(tile_ent)),
                                 body_handle,
                                 rigid_body_set,
                             );
+
+                            // Insert dynamic collider if we have one
+                            if let Some(dynamic_collider) = dynamic_collider {
+                                let shared_shape =
+                                    collider_shape_cache.shared_shape(dynamic_collider.shape);
+                                collider_set.insert_with_parent(
+                                    rapier::ColliderBuilder::new(shared_shape.clone())
+                                        // Don't generate events for this collider
+                                        .active_events(rapier::ActiveEvents::empty())
+                                        // Only needs to collide with dynamics
+                                        .active_collision_types(
+                                            rapier::ActiveCollisionTypes::DYNAMIC_FIXED,
+                                        )
+                                        .solver_groups(InteractionGroups::new(
+                                            simulation_membership.bits().into(),
+                                            simulation_filter.bits().into(),
+                                        ))
+                                        .position(dynamic_collider.offset.into())
+                                        .user_data(RapierUserData::from(tile_ent)),
+                                    body_handle,
+                                    rigid_body_set,
+                                );
+                            }
                             self.tile_rapier_handles
                                 .insert(tile_ent, TileRapierHandle(body_handle));
                             body_handle

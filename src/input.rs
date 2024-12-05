@@ -1,6 +1,6 @@
 use crate::{
     prelude::*,
-    settings::{InputKind, PlayerControlMapping, PlayerControlSetting, Settings},
+    settings::{InputKind, PlayerControlMapping, Settings},
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -64,8 +64,6 @@ pub fn handle_egui_input(game: &mut Game, egui_input: &mut egui::RawInput) {
     collect_player_controls(game);
 
     let ctx = game.shared_resource::<EguiCtx>().unwrap();
-    let controls = game.shared_resource::<GlobalPlayerControls>().unwrap();
-
     let settings = ctx.get_state::<EguiInputSettings>();
     let events = &mut egui_input.events;
 
@@ -76,6 +74,8 @@ pub fn handle_egui_input(game: &mut Game, egui_input: &mut egui::RawInput) {
 
     // Forward gamepad events to egui if not disabled.
     if !settings.disable_gamepad_input {
+        let controls = game.shared_resource::<GlobalPlayerControls>().unwrap();
+
         let push_key = |events: &mut Vec<egui::Event>, key| {
             events.push(egui::Event::Key {
                 key,
@@ -85,7 +85,18 @@ pub fn handle_egui_input(game: &mut Game, egui_input: &mut egui::RawInput) {
             });
         };
 
-        for player_control in controls.values() {
+        for (source, player_control) in controls.iter() {
+            if !matches!(source, ControlSource::Gamepad(_)) {
+                continue;
+            };
+
+            if player_control.menu_confirm_just_pressed {
+                push_key(events, egui::Key::Enter);
+            }
+            if player_control.menu_back_just_pressed {
+                push_key(events, egui::Key::Escape);
+            }
+
             if player_control.just_moved {
                 if player_control.move_direction.y > 0.1 {
                     push_key(events, egui::Key::ArrowUp);
@@ -96,12 +107,6 @@ pub fn handle_egui_input(game: &mut Game, egui_input: &mut egui::RawInput) {
                 } else if player_control.move_direction.x > 0.1 {
                     push_key(events, egui::Key::ArrowRight);
                 }
-            }
-            if player_control.menu_confirm_just_pressed {
-                push_key(events, egui::Key::Enter);
-            }
-            if player_control.menu_back_just_pressed {
-                push_key(events, egui::Key::Escape);
             }
         }
     }
@@ -173,6 +178,9 @@ pub struct PlayerControl {
 
     pub slide_pressed: bool,
     pub slide_just_pressed: bool,
+
+    pub ragdoll_pressed: bool,
+    pub ragdoll_just_pressed: bool,
 }
 
 #[derive(HasSchema, Clone)]
@@ -194,7 +202,7 @@ impl Default for PlayerInputCollector {
             // We always have the keyboard controls "plugged in"
             m.insert(ControlSource::Keyboard1, default());
             m.insert(ControlSource::Keyboard2, default());
-            for i in 0..MAX_PLAYERS as u32 {
+            for i in 0..MAX_PLAYERS {
                 m.insert(ControlSource::Gamepad(i), default());
             }
             m
@@ -247,6 +255,11 @@ impl<'a>
                         last.slide_pressed,
                     ),
                     (
+                        &mut current.ragdoll_just_pressed,
+                        current.ragdoll_pressed,
+                        last.ragdoll_pressed,
+                    ),
+                    (
                         &mut current.menu_back_just_pressed,
                         current.menu_back_pressed,
                         last.menu_back_pressed,
@@ -276,7 +289,7 @@ impl<'a>
     /// input events.
     fn apply_inputs(
         &mut self,
-        mapping: &crate::settings::PlayerControlMapping,
+        mapping: &PlayerControlMapping,
         keyboard: &KeyboardInputs,
         gamepad: &GamepadInputs,
     ) {
@@ -286,69 +299,70 @@ impl<'a>
             control_source,
         ) {
             (InputKind::Button(mapped_button), ControlSource::Gamepad(idx)) => {
-                let mut out = None;
-                for input in &gamepad.gamepad_events {
+                for input in gamepad.gamepad_events.iter().rev() {
                     if let GamepadEvent::Button(e) = input {
                         if &e.button == mapped_button && e.gamepad == *idx {
                             let value = if e.value < 0.1 { 0.0 } else { e.value };
-                            out = Some(value);
+                            return Some(value);
                         }
                     }
                 }
-                out
+                None
             }
             (InputKind::AxisPositive(mapped_axis), ControlSource::Gamepad(idx)) => {
-                let mut out = None;
-                for input in &gamepad.gamepad_events {
+                for input in gamepad.gamepad_events.iter().rev() {
                     if let GamepadEvent::Axis(e) = input {
                         if &e.axis == mapped_axis && e.gamepad == *idx {
                             let value = if e.value < 0.1 { 0.0 } else { e.value };
-                            out = Some(value);
+                            return Some(value);
                         }
                     }
                 }
-                out
+                None
             }
             (InputKind::AxisNegative(mapped_axis), ControlSource::Gamepad(idx)) => {
-                let mut out = None;
-                for input in &gamepad.gamepad_events {
+                for input in gamepad.gamepad_events.iter().rev() {
                     if let GamepadEvent::Axis(e) = input {
                         if &e.axis == mapped_axis && e.gamepad == *idx {
                             let value = if e.value > -0.1 { 0.0 } else { e.value };
-                            out = Some(value);
+                            return Some(value);
                         }
                     }
                 }
-                out
+                None
             }
             (
                 InputKind::Keyboard(mapped_key),
                 ControlSource::Keyboard1 | ControlSource::Keyboard2,
             ) => {
-                let mut out = None;
-                for input in &keyboard.key_events {
+                for input in keyboard.key_events.iter().rev() {
                     if input.key_code.option() == Some(*mapped_key) {
-                        out = Some(if input.button_state.pressed() {
+                        return Some(if input.button_state.pressed() {
                             1.0
                         } else {
                             0.0
                         });
                     }
                 }
-                out
+                None
             }
             _ => None,
         };
 
-        let apply_controls = |control: &mut PlayerControl,
-                              source: &ControlSource,
-                              mapping: &PlayerControlSetting| {
+        for (source, control) in self.current_controls.iter_mut() {
+            let mapping = match source {
+                ControlSource::Keyboard1 => &mapping.keyboard1,
+                ControlSource::Keyboard2 => &mapping.keyboard2,
+                ControlSource::Gamepad(_) => &mapping.gamepad,
+            };
+
             for (button_pressed, button_map) in [
                 (&mut control.pause_pressed, &mapping.pause),
                 (&mut control.jump_pressed, &mapping.jump),
                 (&mut control.grab_pressed, &mapping.grab),
                 (&mut control.shoot_pressed, &mapping.shoot),
                 (&mut control.slide_pressed, &mapping.slide),
+                (&mut control.ragdoll_pressed, &mapping.ragdoll),
                 (&mut control.menu_back_pressed, &mapping.menu_back),
                 (&mut control.menu_confirm_pressed, &mapping.menu_confirm),
                 (&mut control.menu_start_pressed, &mapping.menu_start),
@@ -358,30 +372,36 @@ impl<'a>
                 }
             }
 
-            if let Some(left) = get_input_value(&mapping.movement.left, source) {
-                control.left = left.abs();
-            }
-            if let Some(right) = get_input_value(&mapping.movement.right, source) {
-                control.right = right.abs();
-            }
-            if let Some(up) = get_input_value(&mapping.movement.up, source) {
-                control.up = up.abs();
-            }
-            if let Some(down) = get_input_value(&mapping.movement.down, source) {
-                control.down = down.abs();
-            }
-        };
+            // helper for merging two inputs (like dpad + joystick for example) allowing multiple bindings
+            // for same control
+            let merge_inputs = |input1: &InputKind, input2: &InputKind| -> Option<f32> {
+                match (
+                    get_input_value(input1, source),
+                    get_input_value(input2, source),
+                ) {
+                    // Both inputs have a value and the first is zero -- use the second value
+                    (Some(0.0), Some(value2)) => Some(value2),
+                    // First input has a non-zero value -- use the first value
+                    (Some(value1), _) => Some(value1),
+                    // First input has no value -- use the second
+                    (None, value2) => value2,
+                }
+                .map(f32::abs)
+            };
 
-        for (source, control) in self.current_controls.iter_mut() {
-            apply_controls(
-                control,
-                source,
-                match source {
-                    ControlSource::Keyboard1 => &mapping.keyboard1,
-                    ControlSource::Keyboard2 => &mapping.keyboard2,
-                    ControlSource::Gamepad(_) => &mapping.gamepad,
-                },
-            );
+            if let Some(left) = merge_inputs(&mapping.movement.left, &mapping.movement_alt.left) {
+                control.left = left;
+            }
+            if let Some(right) = merge_inputs(&mapping.movement.right, &mapping.movement_alt.right)
+            {
+                control.right = right;
+            }
+            if let Some(up) = merge_inputs(&mapping.movement.up, &mapping.movement_alt.up) {
+                control.up = up;
+            }
+            if let Some(down) = merge_inputs(&mapping.movement.down, &mapping.movement_alt.down) {
+                control.down = down;
+            }
         }
     }
 
@@ -399,6 +419,7 @@ impl NetworkPlayerControl<DensePlayerControl> for PlayerControl {
         dense_control.set_grab_pressed(self.grab_pressed);
         dense_control.set_slide_pressed(self.slide_pressed);
         dense_control.set_shoot_pressed(self.shoot_pressed);
+        dense_control.set_ragdoll_pressed(self.ragdoll_pressed);
         dense_control.set_move_direction(proto::DenseMoveDirection(self.move_direction));
         dense_control
     }
@@ -416,6 +437,10 @@ impl NetworkPlayerControl<DensePlayerControl> for PlayerControl {
         self.shoot_just_pressed = shoot_pressed && !self.shoot_pressed;
         self.shoot_pressed = shoot_pressed;
 
+        let ragdoll_pressed = new_control.ragdoll_pressed();
+        self.ragdoll_just_pressed = ragdoll_pressed && !self.ragdoll_pressed;
+        self.ragdoll_pressed = ragdoll_pressed;
+
         let was_moving = self.move_direction.length_squared() > f32::MIN_POSITIVE;
         self.move_direction = new_control.move_direction().0;
         let is_moving = self.move_direction.length_squared() > f32::MIN_POSITIVE;
@@ -425,18 +450,19 @@ impl NetworkPlayerControl<DensePlayerControl> for PlayerControl {
 
 #[cfg(not(target_arch = "wasm32"))]
 bitfield::bitfield! {
-    /// A player's controller inputs densely packed into a single u16.
+    /// A player's controller inputs densely packed into a single u32.
     ///
     /// This is used when sending player inputs across the network.
     #[derive(bytemuck::Pod, bytemuck::Zeroable, Copy, Clone, PartialEq, Eq)]//, Reflect)]
     #[repr(transparent)]
-    pub struct DensePlayerControl(u16);
+    pub struct DensePlayerControl(u32);
     impl Debug;
     pub jump_pressed, set_jump_pressed: 0;
     pub shoot_pressed, set_shoot_pressed: 1;
     pub grab_pressed, set_grab_pressed: 2;
     pub slide_pressed, set_slide_pressed: 3;
-    pub from into DenseMoveDirection, move_direction, set_move_direction: 15, 4;
+    pub ragdoll_pressed, set_ragdoll_pressed: 4;
+    pub from into DenseMoveDirection, move_direction, set_move_direction: 16, 5;
 }
 
 #[cfg(not(target_arch = "wasm32"))]
