@@ -6,12 +6,13 @@ use crate::prelude::*;
 pub fn game_plugin(game: &mut Game) {
     game.systems.add_before_system(mark_new_frame);
     game.sessions
-        .create(SessionNames::PROFILER)
-        .install_plugin(session_plugin);
+        .create_with(SessionNames::PROFILER, |builder| {
+            builder.install_plugin(session_plugin);
+        });
 }
 
 /// Install the profiler UI to profiler session.
-fn session_plugin(session: &mut Session) {
+fn session_plugin(session: &mut SessionBuilder) {
     session
         .stages
         .add_system_to_stage(CoreStage::First, profiler);
