@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BindingKind"],"fn":["get_input","widget"]};

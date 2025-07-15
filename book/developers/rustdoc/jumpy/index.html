@@ -1,0 +1,125 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Jumpy"><title>jumpy - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-46f98efaafac5295.ttf.woff2,FiraSans-Regular-018c141bf0843ffd.woff2,FiraSans-Medium-8f9a781e4970d388.woff2,SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2,SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../static.files/rustdoc-c5d6553a23f1e5a6.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="jumpy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.81.0 (eeb90cda1 2024-09-04)" data-channel="1.81.0" data-search-js="search-d234aafac6c221dd.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../static.files/storage-118b08c4c78b968e.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-d2fab2bf619172d3.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-df360f571f6edeae.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-2c020d218678b618.svg"><script src='https://unpkg.com/panzoom@9.4.0/dist/panzoom.min.js'></script>
+<script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.2.2/dist/mermaid.esm.min.mjs"
+    mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'loose',
+        theme: 'dark',
+        themeVariables: {
+            fontSize: '16px',
+            lineColor: '#F8B229',
+            clusterBkg: '#0000',
+            edgeLabelBackground: '#1A1A1A'
+        }
+    });
+    mermaid.run({
+        querySelector: '.mermaid',
+        postRenderCallback: id => {
+            let el = document.getElementById(id);
+            const pz = panzoom(el, {
+                smoothScroll: false,
+                zoomDoubleClickSpeed: 1,
+                beforeWheel: function (e) {
+                    // allow wheel-zoom only if ctrl is down. Otherwise - ignore
+                    var shouldIgnore = !e.ctrlKey;
+                    return shouldIgnore;
+                }
+            })
+
+            const plusDiv = document.createElement('div');
+            plusDiv.style = "width: 25px; height: 25px; position: absolute; right: 0.8em; bottom: 0.8em; border: 2px solid #BBB; text-align: center; padding: auto; font-size: 18px; background-color: #222; cursor: pointer"
+            plusDiv.innerText = "+"
+            plusDiv.onclick = () => {
+                pz.smoothZoom(0, 0, 1.2)
+            }
+            el.parentNode.appendChild(plusDiv);
+
+            const minusDiv = document.createElement('div');
+            minusDiv.style = "width: 25px; height: 25px; position: absolute; right: 2.4em; bottom: 0.8em; border: 2px solid #BBB; text-align: center; padding: auto; font-size: 18px; background-color: #222; cursor: pointer"
+            minusDiv.innerText = "-"
+            minusDiv.onclick = () => {
+                pz.smoothZoom(0, 0, 0.8)
+            }
+            el.parentNode.appendChild(minusDiv);
+        }
+    })
+
+    // Callback for use in mermaid diagrams that will open a relative doc link when clicking.
+    //
+    // Example doc link for `arg` would be: jumpy/session/struct.SessionManager.html
+    window.docLink = (arg) => {
+        let pathElems = new URL(window.location.href).pathname.split('/').filter(x => x != '');
+        for (let i = pathElems.length - 1; i > -1; i--) {
+            if (pathElems[i] != 'jumpy' && pathElems[i] != 'jumpy_core') {
+                pathElems = pathElems.slice(0, i - 1);
+                break;
+            }
+        }
+        window.location.href = '/' + pathElems.join('/') + '/' + arg;
+    }
+</script>
+<style>
+    /*
+        Hide the lock icons shown for private items. It isn't helpful
+        in this context.
+    */
+    [title="Restricted Visibility"] {
+        display: none;
+    }
+
+    .mermaid {
+        overflow: hidden !important;
+        border: 1px solid #BBB;
+        border-radius: 1em;
+        cursor: move;
+        position: relative;
+    }
+
+    .dotted rect {
+        stroke-dasharray: 5;
+    }
+
+    .code .nodeLabel {
+        color: #2dbfb8 !important;
+    }
+
+    .code rect {
+        transition: 0.2s;
+        stroke: #2dbfb8 !important;
+    }
+
+    .code:hover rect {
+        transform: scale(1.05)
+    }
+</style>
+
+</head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button><a class="logo-container" href="../jumpy/index.html"><img src="https://avatars.githubusercontent.com/u/87333478?s=200&amp;v=4" alt=""></a></nav><nav class="sidebar"><div class="sidebar-crate"><a class="logo-container" href="../jumpy/index.html"><img src="https://avatars.githubusercontent.com/u/87333478?s=200&amp;v=4" alt="logo"></a><h2><a href="../jumpy/index.html">jumpy</a><span class="version">0.12.2</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section><ul class="block"><li><a href="#modules">Modules</a></li><li><a href="#macros">Macros</a></li><li><a href="#structs">Structs</a></li><li><a href="#functions">Functions</a></li></ul></section></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1>Crate <a class="mod" href="#">jumpy</a><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><span class="out-of-band"><a class="src" href="../src/jumpy/main.rs.html#1-273">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="jumpy"><a class="doc-anchor" href="#jumpy">§</a>Jumpy</h2>
+<p>Jumpy is a pixel-style, tactical 2D shooter with a fishy theme.</p>
+<p>This is the project’s internal developer API and architecture documentation. We want these docs to
+be the go-to place for understanding how Jumpy works, so you’ll find much more than the comments on
+various types and functions.</p>
+<h5 id="-under-construction"><a class="doc-anchor" href="#-under-construction">§</a>🚧 Under Construction</h5>
+<p>Jumpy is still under heavy development and the docs as well as the code will be changing and
+incomplete. If you want to help out, feel free to fill in some missing docs or clarify something we
+didn’t explain very well. We’re glad to answer any questions you might have along the way!</p>
+<h5 id="diagrams"><a class="doc-anchor" href="#diagrams">§</a>Diagrams</h5>
+<p>Throughout the docs there are diagrams to explain certain topics. These may contain clickable links,
+highlighted in blue, that will bring you to the relevant module or struct. We also use a convention to
+indicate what kind of code object it links to, based on the shape of the box.</p>
+<pre class="mermaid">
+graph LR
+  ex("Example Link ( Note )"):::dotted -.-> sm(GameMeta):::code
+  click sm call docLink(jumpy/struct.GameMeta.html)
+
+  crate:::code --> module([module]):::code --> struct(struct):::code --> concept>Concept]
+</pre>
+<p>You can pan the diagram by clicking and dragging or zoom by holding <code>ctrl</code> and scrolling.</p>
+<h3 id="overall-architecture"><a class="doc-anchor" href="#overall-architecture">§</a>Overall Architecture</h3>
+<p>Jumpy has just finished a migration to the new <a href="https://fishfolk.github.io/bones/rustdoc/bones_framework/index.html"><code>bones_framework</code></a> and some of the docs might not
+be up-to-date yet.</p>
+<p>The good news is that everything is simpler now! All of jumpy has been moved to one crate with many
+of it’s more foundational features being moved into <a href="https://fishfolk.github.io/bones/rustdoc/bones_framework/index.html"><code>bones_framework</code></a>. Additionally, Jumpy no longer
+uses Bevy or the Bevy ECS directly. The game is fully built on Bones with Bevy being used in the
+background, but only for rendering.</p>
+<p>An explanation post and more up-to-date docs are comming soon!</p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="mod" href="audio/index.html" title="mod jumpy::audio">audio</a></div></li><li><div class="item-name"><a class="mod" href="core/index.html" title="mod jumpy::core">core</a></div></li><li><div class="item-name"><a class="mod" href="debug/index.html" title="mod jumpy::debug">debug</a></div><div class="desc docblock-short">Debug tools and menus.</div></li><li><div class="item-name"><a class="mod" href="fullscreen/index.html" title="mod jumpy::fullscreen">fullscreen</a></div></li><li><div class="item-name"><a class="mod" href="input/index.html" title="mod jumpy::input">input</a></div></li><li><div class="item-name"><a class="mod" href="prelude/index.html" title="mod jumpy::prelude">prelude</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></li><li><div class="item-name"><a class="mod" href="profiler/index.html" title="mod jumpy::profiler">profiler</a></div><div class="desc docblock-short">Game plugin for performance profiling tools.</div></li><li><div class="item-name"><a class="mod" href="sessions/index.html" title="mod jumpy::sessions">sessions</a></div></li><li><div class="item-name"><a class="mod" href="settings/index.html" title="mod jumpy::settings">settings</a></div></li><li><div class="item-name"><a class="mod" href="ui/index.html" title="mod jumpy::ui">ui</a></div></li></ul><h2 id="macros" class="section-header">Macros<a href="#macros" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="macro" href="macro.impl_system_param.html" title="macro jumpy::impl_system_param">impl_system_param</a></div><div class="desc docblock-short">Macro to “derive” ( not really a derive macro ) SystemParam for a struct.</div></li></ul><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="struct" href="struct.GameMeta.html" title="struct jumpy::GameMeta">GameMeta</a></div></li><li><div class="item-name"><a class="struct" href="struct.GameMusic.html" title="struct jumpy::GameMusic">GameMusic</a></div></li><li><div class="item-name"><a class="struct" href="struct.NetworkMeta.html" title="struct jumpy::NetworkMeta">NetworkMeta</a></div></li><li><div class="item-name"><a class="struct" href="struct.PackMeta.html" title="struct jumpy::PackMeta">PackMeta</a></div></li></ul><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="fn" href="fn.load_progress.html" title="fn jumpy::load_progress">load_progress</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></li><li><div class="item-name"><a class="fn" href="fn.main.html" title="fn jumpy::main">main</a><span title="Restricted Visibility">&nbsp;🔒</span> </div></li></ul></section></div></main></body></html>

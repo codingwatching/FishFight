@@ -1,0 +1,161 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Derive macro for the HasSchema trait."><title>HasSchema in jumpy::prelude::bones_schema - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-46f98efaafac5295.ttf.woff2,FiraSans-Regular-018c141bf0843ffd.woff2,FiraSans-Medium-8f9a781e4970d388.woff2,SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2,SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-c5d6553a23f1e5a6.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="jumpy" data-themes="" data-resource-suffix="" data-rustdoc-version="1.81.0 (eeb90cda1 2024-09-04)" data-channel="1.81.0" data-search-js="search-d234aafac6c221dd.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../../../static.files/storage-118b08c4c78b968e.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../static.files/main-d2fab2bf619172d3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-df360f571f6edeae.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-2c020d218678b618.svg"><script src='https://unpkg.com/panzoom@9.4.0/dist/panzoom.min.js'></script>
+<script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10.2.2/dist/mermaid.esm.min.mjs"
+    mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'loose',
+        theme: 'dark',
+        themeVariables: {
+            fontSize: '16px',
+            lineColor: '#F8B229',
+            clusterBkg: '#0000',
+            edgeLabelBackground: '#1A1A1A'
+        }
+    });
+    mermaid.run({
+        querySelector: '.mermaid',
+        postRenderCallback: id => {
+            let el = document.getElementById(id);
+            const pz = panzoom(el, {
+                smoothScroll: false,
+                zoomDoubleClickSpeed: 1,
+                beforeWheel: function (e) {
+                    // allow wheel-zoom only if ctrl is down. Otherwise - ignore
+                    var shouldIgnore = !e.ctrlKey;
+                    return shouldIgnore;
+                }
+            })
+
+            const plusDiv = document.createElement('div');
+            plusDiv.style = "width: 25px; height: 25px; position: absolute; right: 0.8em; bottom: 0.8em; border: 2px solid #BBB; text-align: center; padding: auto; font-size: 18px; background-color: #222; cursor: pointer"
+            plusDiv.innerText = "+"
+            plusDiv.onclick = () => {
+                pz.smoothZoom(0, 0, 1.2)
+            }
+            el.parentNode.appendChild(plusDiv);
+
+            const minusDiv = document.createElement('div');
+            minusDiv.style = "width: 25px; height: 25px; position: absolute; right: 2.4em; bottom: 0.8em; border: 2px solid #BBB; text-align: center; padding: auto; font-size: 18px; background-color: #222; cursor: pointer"
+            minusDiv.innerText = "-"
+            minusDiv.onclick = () => {
+                pz.smoothZoom(0, 0, 0.8)
+            }
+            el.parentNode.appendChild(minusDiv);
+        }
+    })
+
+    // Callback for use in mermaid diagrams that will open a relative doc link when clicking.
+    //
+    // Example doc link for `arg` would be: jumpy/session/struct.SessionManager.html
+    window.docLink = (arg) => {
+        let pathElems = new URL(window.location.href).pathname.split('/').filter(x => x != '');
+        for (let i = pathElems.length - 1; i > -1; i--) {
+            if (pathElems[i] != 'jumpy' && pathElems[i] != 'jumpy_core') {
+                pathElems = pathElems.slice(0, i - 1);
+                break;
+            }
+        }
+        window.location.href = '/' + pathElems.join('/') + '/' + arg;
+    }
+</script>
+<style>
+    /*
+        Hide the lock icons shown for private items. It isn't helpful
+        in this context.
+    */
+    [title="Restricted Visibility"] {
+        display: none;
+    }
+
+    .mermaid {
+        overflow: hidden !important;
+        border: 1px solid #BBB;
+        border-radius: 1em;
+        cursor: move;
+        position: relative;
+    }
+
+    .dotted rect {
+        stroke-dasharray: 5;
+    }
+
+    .code .nodeLabel {
+        color: #2dbfb8 !important;
+    }
+
+    .code rect {
+        transition: 0.2s;
+        stroke: #2dbfb8 !important;
+    }
+
+    .code:hover rect {
+        transform: scale(1.05)
+    }
+</style>
+
+</head><body class="rustdoc derive"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button><a class="logo-container" href="../../../jumpy/index.html"><img src="https://avatars.githubusercontent.com/u/87333478?s=200&amp;v=4" alt=""></a></nav><nav class="sidebar"><div class="sidebar-crate"><a class="logo-container" href="../../../jumpy/index.html"><img src="https://avatars.githubusercontent.com/u/87333478?s=200&amp;v=4" alt="logo"></a><h2><a href="../../../jumpy/index.html">jumpy</a><span class="version">0.12.2</span></h2></div><div class="sidebar-elems"><h2><a href="index.html">In jumpy::prelude::bones_schema</a></h2></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1>Derive Macro <a href="../../index.html">jumpy</a>::<wbr><a href="../index.html">prelude</a>::<wbr><a href="index.html">bones_schema</a>::<wbr><a class="derive" href="#">HasSchema</a><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><span class="out-of-band"><button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><pre class="rust item-decl"><code>#[derive(HasSchema)]
+{
+    <span class="comment">// Attributes available to this derive:</span>
+    #[schema]
+    #[derive_type_data]
+    #[type_data]
+    #[schema_module]
+}
+</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Derive macro for the HasSchema trait.</p>
+<h3 id="usage-with-reprc"><a class="doc-anchor" href="#usage-with-reprc">§</a>Usage with #[repr(C)]</h3>
+<p>HasSchema works with the #[repr(C)] annotation to fully implement its features.</p>
+<p>If there is no #[repr(C)] annotation, the SchemaKind of your type’s schema will be Opaque.</p>
+<p>This means if you don’t know the kind of type, like in the case of a SchemaBox, you’ll be unable
+to read the fields.</p>
+<p>This applies to bones’ lua scripting since SchemaBox is effectively the “lua type”.
+See SchemaBox.</p>
+<p>If you intend a type to be opaque even though it has #[repr(C)] you can use #[schema(opaque)]
+to force an opaque schema representation.</p>
+<p>Keep in mind, enums deriving HasSchema with a #[repr(C)] annotation must also specify an
+enum tag type like #[repr(C, u8)] where u8 could be either u16 or u32 if you need
+more than 256 enum variants.</p>
+<h3 id="no_default--no_clone-attributes"><a class="doc-anchor" href="#no_default--no_clone-attributes">§</a>no_default &amp; no_clone attributes</h3>
+<p>HasSchema derive requires the type to implement Default &amp; Clone, if either of these cannot be
+implemented you can use the no_default &amp; no_clone schema attributes respectively to ignore
+these requirements.</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="attr">#[derive(HasSchema, Default)]
+#[schema(no_clone)]
+</span><span class="kw">struct </span>DoesntImplClone;
+
+<span class="attr">#[derive(HasSchema, Clone)]
+#[schema(no_default)]
+</span><span class="kw">struct </span>DoesntImplDefault;</code></pre></div>
+<p>The caveat for putting no_default on your type is that it cannot be created from a Schema.
+This is necessary if you want to create your type within a bones lua script.</p>
+<p>Since the fields that need to be initialized to create a complete version of your type cannot be
+determined, Schema needs a default function to initialize the data properly.</p>
+<p>The caveat for putting no_clone on your type is that it cannot be cloned in the form of a
+SchemaBox.</p>
+<p>This is critical in the case of bones’ networking which will panic if your type is in the world
+and does not implement clone during the network rollback.</p>
+<h3 id="type_data-attribute"><a class="doc-anchor" href="#type_data-attribute">§</a>type_data attribute</h3>
+<p>This attribute takes an expression and stores that value in what is basically
+a type keyed map accessible from your type’s Schema.</p>
+<h3 id="derive_type_data-attribute"><a class="doc-anchor" href="#derive_type_data-attribute">§</a>derive_type_data attribute</h3>
+<p>This attribute is simply a shortcut equivalent to using the type_data attribute
+with any type’s <code>FromType&lt;YourHasSchemaType&gt;</code> implementation like so:</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="attr">#[derive(HasSchema, Clone, Default)]
+#[type_data(&lt;OtherType <span class="kw">as </span>FromType&lt;Data&gt;&gt;::from_type())]
+</span><span class="kw">struct </span>Data;</code></pre></div>
+<p>Simply specify a type instead of an expression:</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="attr">#[derive(HasSchema, Clone, Default)]
+#[derive_type_data(OtherType)] </span><span class="comment">// OtherType implements FromType&lt;Data&gt;
+</span><span class="kw">struct </span>Data;</code></pre></div>
+<h3 id="known-limitations"><a class="doc-anchor" href="#known-limitations">§</a>Known Limitations</h3>
+<p>Currently it isn’t possible to construct a struct that contains itself. For example, this will
+not work:</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="attr">#[derive(HasSchema)]
+</span><span class="kw">struct </span>Data {
+    others: Vec&lt;Data&gt;,
+}</code></pre></div>
+<p>If this is a problem for your use-case, please open an issue.</p>
+</div></details></section></div></main></body></html>

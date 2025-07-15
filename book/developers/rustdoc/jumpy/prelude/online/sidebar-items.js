@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MATCH_ALPN","READ_TO_END_BYTE_COUNT"],"enum":["OnlineMatchmakerRequest","OnlineMatchmakerResponse","PlayerIdxAssignment"],"static":["ONLINE_MATCHMAKER"],"struct":["LobbyId","LobbyInfo","LobbyListItem","MatchInfo","MatchmakerConnectionState","OnlineMatchmaker"],"type":["GameID"]};

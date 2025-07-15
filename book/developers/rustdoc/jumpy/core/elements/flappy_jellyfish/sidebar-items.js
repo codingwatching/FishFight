@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["GRAVITY","MAX_SPEED","MIN_SPEED","SPEED_JUMP","SPEED_X"],"fn":["control_flappy_jellyfish","explode_flappy_jellyfish","session_plugin","spawn","spawn_or_take_control","take_control"],"struct":["ExplodeFlappyJellyfish","FlappyJellyfish","FlappyJellyfishMeta"],"trait":["FlappyJellyfishMetaSchemaExts"]};

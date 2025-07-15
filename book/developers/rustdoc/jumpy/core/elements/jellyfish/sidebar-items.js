@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["dehydrate","game_plugin","hydrate","session_plugin","update_player_driving"],"struct":["DehydrateJellyfish","Jellyfish","JellyfishMeta","PlayerDrivingJellyfish"]};

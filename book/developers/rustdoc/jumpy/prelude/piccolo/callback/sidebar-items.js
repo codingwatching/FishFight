@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CallbackReturn","SequencePoll"],"struct":["BoxSequence","Callback","CallbackInner"],"trait":["CallbackFn","Sequence"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["MapSelectMessage"],"fn":["handle_match_setup_messages","replicate_map_select_action","widget"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ClosureError","PrototypeError","UpValueState"],"struct":["Closure","ClosureInner","FunctionPrototype","UpValue"],"type":["UpValueInner"]};
