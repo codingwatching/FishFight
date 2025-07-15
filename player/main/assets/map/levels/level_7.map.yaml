@@ -808,12 +808,12 @@ layers:
   - pos:
     - 15
     - 3
-    idx: 14
+    idx: 4
     collision: Empty
   - pos:
     - 10
     - 4
-    idx: 12
+    idx: 2
     collision: Empty
   - pos:
     - 12
@@ -823,17 +823,17 @@ layers:
   - pos:
     - 15
     - 4
-    idx: 14
+    idx: 4
     collision: Empty
   - pos:
     - 10
     - 5
-    idx: 12
+    idx: 2
     collision: Empty
   - pos:
     - 11
     - 5
-    idx: 14
+    idx: 4
     collision: Empty
   - pos:
     - 12
@@ -843,22 +843,22 @@ layers:
   - pos:
     - 14
     - 5
-    idx: 12
+    idx: 2
     collision: Empty
   - pos:
     - 15
     - 5
-    idx: 14
+    idx: 4
     collision: Empty
   - pos:
     - 10
     - 6
-    idx: 12
+    idx: 2
     collision: Empty
   - pos:
     - 11
     - 6
-    idx: 14
+    idx: 4
     collision: Empty
   - pos:
     - 12
@@ -868,12 +868,12 @@ layers:
   - pos:
     - 14
     - 6
-    idx: 12
+    idx: 2
     collision: Empty
   - pos:
     - 15
     - 6
-    idx: 14
+    idx: 4
     collision: Empty
   - pos:
     - 12
@@ -902,172 +902,172 @@ layers:
   - pos:
     - 9
     - 6
-    idx: 41
+    idx: 52
     collision: JumpThrough
   - pos:
     - 10
     - 6
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 11
     - 6
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 12
     - 6
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 13
     - 6
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 14
     - 6
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 15
     - 6
-    idx: 43
+    idx: 54
     collision: JumpThrough
   - pos:
     - 5
     - 8
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 6
     - 8
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 7
     - 8
-    idx: 43
+    idx: 54
     collision: JumpThrough
   - pos:
     - 17
     - 8
-    idx: 41
+    idx: 52
     collision: JumpThrough
   - pos:
     - 18
     - 8
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 19
     - 8
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 11
     - 10
-    idx: 41
+    idx: 52
     collision: JumpThrough
   - pos:
     - 12
     - 10
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 13
     - 10
-    idx: 43
+    idx: 54
     collision: JumpThrough
   - pos:
     - 5
     - 12
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 6
     - 12
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 7
     - 12
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 8
     - 12
-    idx: 43
+    idx: 54
     collision: JumpThrough
   - pos:
     - 16
     - 12
-    idx: 41
+    idx: 52
     collision: JumpThrough
   - pos:
     - 17
     - 12
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 18
     - 12
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 19
     - 12
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 5
     - 17
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 6
     - 17
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 7
     - 17
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 8
     - 17
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 9
     - 17
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 15
     - 17
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 16
     - 17
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 17
     - 17
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 18
     - 17
-    idx: 42
+    idx: 53
     collision: JumpThrough
   - pos:
     - 19
     - 17
-    idx: 42
+    idx: 53
     collision: JumpThrough
   elements: []
 - id: critters
@@ -1173,7 +1173,7 @@ layers:
   - pos:
     - 216.0
     - 310.5
-    element: /elements/item/musket/musket.element.yaml
+    element: /elements/item/machine_gun/machine_gun.element.yaml
   - pos:
     - 248.0
     - 438.5
@@ -1185,7 +1185,7 @@ layers:
   - pos:
     - 712.0
     - 182.5
-    element: /elements/item/musket/musket.element.yaml
+    element: /elements/item/periscope/periscope.element.yaml
   - pos:
     - 552.0
     - 438.5
@@ -1197,7 +1197,7 @@ layers:
   - pos:
     - 584.0
     - 310.5
-    element: /elements/item/musket/musket.element.yaml
+    element: /elements/item/buss/buss.element.yaml
   - pos:
     - 400.0
     - 374.5
